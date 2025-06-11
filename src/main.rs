@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use servicekit::{db, scheduler::Scheduler, sql, PsnClass, MySchedule, WebServer};
-use sqlx::MySqlPool;
+use servicekit::{db, scheduler::Scheduler, sql, MySchedule, PsnClass, WebServer};
+use sqlx::{MySql, MySqlPool, QueryBuilder};
 
 // 示例定时任务
 struct ExampleTask {
@@ -12,10 +12,39 @@ impl MySchedule for ExampleTask {
     async fn execute(&self) {
         println!("Running scheduled task at: {}", chrono::Local::now());
 
-        // 加载并执行 SQL
+        let hit_date = Some("2023-11-22");
+        let train_ids = Some(vec![
+            "009b6addc3394455a645938b5bc981b7",
+            "015dc7e8a2ec46ac958d1713617ffd1e",
+        ]);
+
+        // 构建基础SQL
         let sql = sql::load_sql("train_query");
-        match sqlx::query_as::<_, PsnClass>(&sql)
-            .bind("2023-11-22") // 绑定参数
+
+        // 动态构建查询条件
+        let mut query_builder = QueryBuilder::<MySql>::new(&sql);
+
+        // 处理 hitDate 条件
+        if let Some(date) = hit_date {
+            query_builder.push(" AND a.hitdate = ");
+            query_builder.push_bind(date);
+        }
+
+        // 处理 list 条件
+        if let Some(ids) = train_ids {
+            if !ids.is_empty() {
+                query_builder.push(" AND a.TRAINID IN (");
+                let mut separated = query_builder.separated(", ");
+                for id in ids {
+                    separated.push_bind(id);
+                }
+                separated.push_unseparated(")");
+            }
+        }
+
+        // 执行查询
+        match query_builder
+            .build_query_as::<PsnClass>()
             .fetch_all(&self.pool)
             .await
         {
