@@ -1,5 +1,6 @@
 use async_trait::async_trait;
-use servicekit::{db, scheduler::Scheduler, sql, MySchedule, PsnClass, WebServer};
+use servicekit::{db::pool, scheduler::Scheduler, MySchedule, PsnClass, WebServer};
+use sqlx::Execute;
 use sqlx::{MySql, MySqlPool, QueryBuilder};
 
 // 示例定时任务
@@ -12,25 +13,21 @@ impl MySchedule for ExampleTask {
     async fn execute(&self) {
         println!("Running scheduled task at: {}", chrono::Local::now());
 
-        let hit_date = Some("2023-11-22");
-        let train_ids = Some(vec![
-            "009b6addc3394455a645938b5bc981b7",
-            "015dc7e8a2ec46ac958d1713617ffd1e",
-        ]);
-
-        // 构建基础SQL
-        let sql = sql::load_sql("train_query");
-
-        // 动态构建查询条件
-        let mut query_builder = QueryBuilder::<MySql>::new(&sql);
+        let mut query_builder =
+            QueryBuilder::<MySql>::new(sqlx::query_file!("queries/trains.sql").sql());
 
         // 处理 hitDate 条件
+        let hit_date = Some("2023-11-22");
         if let Some(date) = hit_date {
             query_builder.push(" AND a.hitdate = ");
             query_builder.push_bind(date);
         }
 
-        // 处理 list 条件
+        // 处理 train_ids 条件
+        let train_ids = Some(vec![
+            "009b6addc3394455a645938b5bc981b7",
+            "015dc7e8a2ec46ac958d1713617ffd1e",
+        ]);
         if let Some(ids) = train_ids {
             if !ids.is_empty() {
                 query_builder.push(" AND a.TRAINID IN (");
@@ -68,7 +65,7 @@ async fn main() -> std::io::Result<()> {
     env_logger::init();
 
     // 创建数据库连接池
-    let pool = db::create_pool("mysql://dxxy:dreamsoft@2020@172.25.2.87:3306/dxxy")
+    let pool = pool::create_pool("mysql://dxxy:dreamsoft@2020@172.25.2.87:3306/dxxy")
         .await
         .expect("Failed to create database pool");
 

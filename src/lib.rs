@@ -2,7 +2,6 @@ pub mod scheduler;
 pub mod web;
 pub mod db;
 pub mod models;
-pub mod sql;
 
 pub use scheduler::MySchedule;
 pub use web::WebServer;
