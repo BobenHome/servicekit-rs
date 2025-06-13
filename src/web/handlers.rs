@@ -79,7 +79,7 @@ pub async fn get_train_by_id(
     .await
     {
         Ok(Some(row)) => {
-            let json_response = json!({
+            let train_data = json!({
                 "_id": row.get::<Option<String>, _>("_id").unwrap_or_default(),
                 "id": row.get::<Option<String>, _>("id").unwrap_or_default(),
                 "operation": row.get::<Option<String>, _>("operation").unwrap_or_default(),
@@ -87,11 +87,28 @@ pub async fn get_train_by_id(
                 "training_name": row.get::<Option<String>, _>("training_name").unwrap_or_default(),
                 "train_level": row.get::<Option<String>, _>("train_level"),
                 "train_mode": row.get::<Option<String>, _>("train_mode"),
-                "train_category": row.get::<Option<String>, _>("train_category")
+                "train_category": row.get::<Option<String>, _>("train_category"),
+                "tags": ["培训", "线下", "专业技能"],
+                "participants": [
+                    {
+                        "id": 1,
+                        "name": "张三",
+                        "department": "技术部"
+                    },
+                    {
+                        "id": 2,
+                        "name": "李四",
+                        "department": "市场部"
+                    }
+                ],
+                "scores": [85, 90, 95],
+                "empty_array": []
             });
-            Ok(HttpResponse::Ok().json(ApiResponse::<Value>::success(json_response)))
+            
+            // 将单个对象包装在数组中
+            Ok(HttpResponse::Ok().json(ApiResponse::<Vec<Value>>::success(vec![train_data])))
         },
-        Ok(None) => Ok(HttpResponse::NotFound().json(ApiResponse::<Value>::error("Train not found".into()))),
-        Err(e) => Ok(HttpResponse::InternalServerError().json(ApiResponse::<Value>::error(e.to_string())))
+        Ok(None) => Ok(HttpResponse::NotFound().json(ApiResponse::<Vec<Value>>::error("Train not found".into()))),
+        Err(e) => Ok(HttpResponse::InternalServerError().json(ApiResponse::<Vec<Value>>::error(e.to_string())))
     }
 }
