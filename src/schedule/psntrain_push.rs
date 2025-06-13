@@ -1,11 +1,17 @@
+use super::task::MySchedule;
 use crate::PsnClass;
 use async_trait::async_trait;
-use sqlx::{MySql, MySqlPool, QueryBuilder};
+use chrono::{Duration, Local};
 use sqlx::Execute;
-use super::task::MySchedule;
+use sqlx::{MySql, MySqlPool, QueryBuilder};
 
 pub struct PsntrainPushTask {
     pub pool: MySqlPool,
+}
+
+// 在结构体 impl 中定义普通方法
+impl PsntrainPushTask {
+    
 }
 
 #[async_trait]
@@ -16,37 +22,25 @@ impl MySchedule for PsntrainPushTask {
         let mut query_builder =
             QueryBuilder::<MySql>::new(sqlx::query_file!("queries/trains.sql").sql());
 
-        // 处理 hitDate 条件
-        let hit_date = Some("2023-11-22");
-        if let Some(date) = hit_date {
-            query_builder.push(" AND a.hitdate = ");
-            query_builder.push_bind(date);
-        }
+        // 获取当前本地日期
+        let today = Local::now().date_naive();
+        // 减去一天
+        let yesterday = today - Duration::days(1);
+        // 格式化为 "YYYY-MM-DD"
+        let hit_date = yesterday.format("%Y-%m-%d").to_string();
 
-        // 处理 train_ids 条件
-        let train_ids = Some(vec![
-            "009b6addc3394455a645938b5bc981b7",
-            "015dc7e8a2ec46ac958d1713617ffd1e",
-        ]);
-        if let Some(ids) = train_ids {
-            if !ids.is_empty() {
-                query_builder.push(" AND a.TRAINID IN (");
-                let mut separated = query_builder.separated(", ");
-                for id in ids {
-                    separated.push_bind(id);
-                }
-                separated.push_unseparated(")");
-            }
-        }
+        query_builder.push(" AND a.hitdate = ");
+        query_builder.push_bind(hit_date);
+        query_builder.push(" LIMIT 1 ");
         // 执行查询
         match query_builder
             .build_query_as::<PsnClass>()
             .fetch_all(&self.pool)
             .await
         {
-            Ok(orgs) => {
-                for org in orgs {
-                    println!("Found orgs: {:?}", org);
+            Ok(psns) => {
+                for psn in psns {
+                    println!("Found psn: {:?}", psn);
                 }
             }
             Err(e) => eprintln!("Database error: {}", e),
@@ -54,6 +48,6 @@ impl MySchedule for PsntrainPushTask {
     }
 
     fn cron_expression(&self) -> &str {
-        "0 */10 * * * * *" // 每分钟执行一次
+        "0 0 5 * * * *" // 每天凌晨5点执行一次
     }
 }
