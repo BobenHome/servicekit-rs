@@ -1,0 +1,34 @@
+{
+  "db_name": "MySQL",
+  "query": "select (1) as id, 'Herp Derpinson' as name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | BINARY",
+          "max_size": 1
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL",
+          "max_size": 56
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d8bf6b5d66599813e20fe6e03002c89f7acc3e101479c799865c27d1a7bea6f6"
+}

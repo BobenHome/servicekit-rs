@@ -5,5 +5,4 @@ pub mod models;
 
 pub use scheduler::MySchedule;
 pub use web::WebServer;
-pub use models::org::McOrgShow;
 pub use models::psn_class::PsnClass;
