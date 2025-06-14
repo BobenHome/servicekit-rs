@@ -25,12 +25,32 @@ impl Scheduler {
         for task in &self.tasks {
             let task = Arc::clone(task);
             tokio::spawn(async move {
+                // 等待到首次执行时间
+                if let Some(delay) = Self::get_initial_delay(task.cron_expression()) {
+                    println!("Waiting for {} seconds before first execution", delay.as_secs());
+                    tokio::time::sleep(delay).await;
+                }
+
                 loop {
                     task.execute().await;
                     tokio::time::sleep(Self::parse_duration(task.cron_expression())).await;
                 }
             });
         }
+    }
+
+    fn get_initial_delay(cron: &str) -> Option<Duration> {
+        if let Ok(schedule) = Schedule::from_str(cron) {
+            let now = Local::now();
+            if let Some(next_time) = schedule.upcoming(Local).next() {
+                // 如果当前时间大于今天的执行时间，就等到明天的执行时间
+                let duration = next_time.signed_duration_since(now);
+                if duration.num_seconds() > 0 {
+                    return Some(Duration::from_secs(duration.num_seconds() as u64));
+                }
+            }
+        }
+        None
     }
 
     fn parse_duration(cron: &str) -> Duration {
