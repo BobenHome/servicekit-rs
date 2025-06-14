@@ -3,6 +3,7 @@ use chrono::Local;
 use env_logger::Builder;
 use log::{error, info, LevelFilter};
 use servicekit::{db::pool, schedule::PsntrainPushTask, WebServer};
+//servicekit是crate 名称（在 Cargo.toml 中定义），代表了库。db::pool, schedule::PsntrainPushTask, WebServer 这些都是从 lib.rs 中 pub use 或 pub mod 导出的项。如果 lib.rs 不存在或者没有正确地导出这些模块，main.rs 将无法直接通过 servicekit:: 路径来访问它们
 use std::io::Write; // 导入 Write trait，用于 format_timestamp 函数，writeln! 宏所需要的 trait
 use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler}; // 导入日志宏 // 导入 Local, Utc, TimeZone
