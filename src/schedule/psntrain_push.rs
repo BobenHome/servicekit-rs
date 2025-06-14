@@ -1,6 +1,4 @@
-use super::task::MySchedule;
 use crate::PsnClass;
-use async_trait::async_trait;
 use chrono::{Duration, Local};
 use sqlx::Execute;
 use sqlx::{MySql, MySqlPool, QueryBuilder};
@@ -9,30 +7,26 @@ pub struct PsntrainPushTask {
     pub pool: MySqlPool,
 }
 
-// 在结构体 impl 中定义普通方法
 impl PsntrainPushTask {
-    
-}
-
-#[async_trait]
-impl MySchedule for PsntrainPushTask {
-    async fn execute(&self) {
-        println!("Running scheduled task at: {}", chrono::Local::now());
+    // 这只是一个普通的公共异步方法，不再是 trait 的一部分
+    pub async fn execute(&self) {
+        // 这里的业务逻辑完全不需要改变！
+        println!(
+            "Running task via tokio-cron-scheduler at: {}",
+            chrono::Local::now()
+        );
 
         let mut query_builder =
             QueryBuilder::<MySql>::new(sqlx::query_file!("queries/trains.sql").sql());
 
-        // 获取当前本地日期
         let today = Local::now().date_naive();
-        // 减去一天
         let yesterday = today - Duration::days(1);
-        // 格式化为 "YYYY-MM-DD"
         let hit_date = yesterday.format("%Y-%m-%d").to_string();
 
         query_builder.push(" AND a.hitdate = ");
         query_builder.push_bind(hit_date);
         query_builder.push(" LIMIT 1 ");
-        // 执行查询
+
         match query_builder
             .build_query_as::<PsnClass>()
             .fetch_all(&self.pool)
@@ -47,7 +41,10 @@ impl MySchedule for PsntrainPushTask {
         }
     }
 
-    fn cron_expression(&self) -> &str {
-        "0 0 5 * * * *" // 每天凌晨5点执行一次
+    // 我们保留这个方法，以便在 main.rs 中方便地获取 Cron 表达式
+    pub fn cron_expression(&self) -> &str {
+        // 注意：你原来的 "0 0 5 * * * *" 包含7个字段（带秒），
+        // tokio-cron-scheduler 完美支持这种格式。
+        "0 30,40 * * * *" // 每小时30和40分钟执行一次
     }
 }
