@@ -15,10 +15,12 @@ async fn main() -> Result<()> {
         .format(|buf, record| {
             writeln!(
                 buf,
-                "{} [{}] {}", // 格式：[本地时间] [级别] 消息
+                "{} [{}] {}:{} - {}", // 格式：[本地时间] [级别] 模块::方法:行号 - 消息
                 Local::now().format("%Y-%m-%d %H:%M:%S%.3f"), // 精确到毫秒的本地时间
                 record.level(),
-                record.args()
+                record.module_path().unwrap_or("unknown"), // 获取模块路径
+                record.line().unwrap_or(0),                // 获取行号
+                record.args()                              // 实际的日志消息
             )
         })
         .init(); // 初始化 env_logger
