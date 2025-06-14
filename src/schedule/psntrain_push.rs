@@ -12,8 +12,7 @@ pub struct PsntrainPushTask {
 impl PsntrainPushTask {
     // 这只是一个普通的公共异步方法，不再是 trait 的一部分
     pub async fn execute(&self) -> Result<()> {
-        // 这里的业务逻辑完全不需要改变！
-        info!("Running task via tokio-cron-scheduler at: {}", Local::now());
+        info!("Running task via tokio-cron-scheduler at: {}", Local::now().format("%Y-%m-%d %H:%M:%S"));
 
         let mut query_builder =
             QueryBuilder::<MySql>::new(sqlx::query_file!("queries/trains.sql").sql());
@@ -49,6 +48,6 @@ impl PsntrainPushTask {
     // 我们保留这个方法，以便在 main.rs 中方便地获取 Cron 表达式
     pub fn cron_expression(&self) -> &str {
         // tokio-cron-scheduler 完美支持这种格式。
-        "0 15,20,30,40 * * * *" // 每小时15、20、30、40分钟执行一次
+        "0 */1 * * * *" // 每5分钟执行一次
     }
 }

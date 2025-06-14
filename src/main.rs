@@ -1,13 +1,27 @@
 use anyhow::{Context, Result};
-use log::{error, info};
+use chrono::Local;
+use env_logger::Builder;
+use log::{error, info, LevelFilter};
 use servicekit::{db::pool, schedule::PsntrainPushTask, WebServer};
+use std::io::Write; // 导入 Write trait，用于 format_timestamp 函数，writeln! 宏所需要的 trait
 use std::sync::Arc;
-use tokio_cron_scheduler::{Job, JobScheduler}; // 导入日志宏
+use tokio_cron_scheduler::{Job, JobScheduler}; // 导入日志宏 // 导入 Local, Utc, TimeZone
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // 初始化日志
-    env_logger::init();
+    Builder::new()
+        .filter_level(LevelFilter::Info) // 设置日志级别为 Info
+        .format(|buf, record| {
+            writeln!(
+                buf,
+                "{} [{}] {}", // 格式：[本地时间] [级别] 消息
+                Local::now().format("%Y-%m-%d %H:%M:%S%.3f"), // 精确到毫秒的本地时间
+                record.level(),
+                record.args()
+            )
+        })
+        .init(); // 初始化 env_logger
     info!("Application starting...");
 
     // 创建数据库连接池
@@ -39,12 +53,29 @@ async fn main() -> Result<()> {
         // 闭包内部的逻辑保持不变，它捕获了 task (Arc) 的所有权
         let task_clone = Arc::clone(&task); // 克隆 Arc 以在闭包内部使用
         Box::pin(async move {
+            // 获取下一次执行时间
+            let next_tick_result = l.next_tick_for_job(uuid).await;
+            // 将 UTC 时间转换为本地时间
+            let next_scheduled_time_str = match next_tick_result {
+                Ok(Some(utc_time)) => {
+                    // 使用 .with_timezone(&Local) 进行转换
+                    // 如果是 Option<DateTime<Utc>>，你需要先解包 Some，再转换
+                    let local_time = utc_time.with_timezone(&Local);
+                    // 格式化为字符串，只包含你想要显示的部分
+                    format!("{}", local_time.format("%Y-%m-%d %H:%M:%S"))
+                    // format!("{}", local_time.format("%Y-%m-%d %H:%M:%S%z")) // 包含时区偏移 +08:00
+                }
+                Ok(None) => "N/A (No next tick)".to_string(), // 没有下一次调度时间
+                Err(e) => {
+                    error!("Error getting next tick for job {:?}: {:?}", uuid, e);
+                    "Error getting next tick".to_string() // 出错时显示错误信息
+                }
+            };
             info!(
-                "Job {:?} is running. Next scheduled time: {:?}",
+                "Job {:?} is running. Next scheduled time (local): {:?}",
                 uuid,
-                l.next_tick_for_job(uuid).await
+                next_scheduled_time_str // 使用转换后的本地时间
             );
-
             // 执行任务，并处理可能的错误
             if let Err(e) = task_clone.execute().await {
                 error!("Error executing job {:?}: {:?}", uuid, e);
