@@ -1,8 +1,9 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use sqlx::FromRow; // 从数据库读取
 
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
-pub struct PsnClass {
+#[derive(Debug, FromRow, Serialize, Deserialize, Clone)]
+pub struct ClassData {
     pub _id: String,
     pub id: String,
     pub operation: String,
@@ -52,4 +53,53 @@ pub struct PsnClass {
     pub org_id: Option<String>,
     pub org_name: Option<String>,
     pub org_class: Option<String>,
+}
+
+// 示例：讲师数据结构体
+#[derive(Debug, FromRow, Serialize, Deserialize, Clone)]
+pub struct LecturerData {
+    pub lecturer_id: i32,
+    pub lecturer_name: String,
+    pub expertise: String,
+    // ... 讲师相关的字段
+}
+
+// 示例：培训数据结构体
+#[derive(Debug, FromRow, Serialize, Deserialize, Clone)]
+pub struct PsnTrainingData {
+    pub training_id: i32,
+    pub course_name: String,
+    pub duration_hours: i32,
+    // ... 培训相关的字段
+}
+
+// 示例：归档数据结构体
+#[derive(Debug, FromRow, Serialize, Deserialize, Clone)]
+pub struct PsnArchiveData {
+    pub archive_id: i32,
+    pub file_name: String,
+    pub file_size: i32,
+    // ... 归档相关的字段
+}
+
+// 定义一个枚举来封装所有可能的数据类型
+#[derive(Debug, Serialize, Clone)] // Enum 也需要 Serialize
+#[serde(untagged)] // 使用 untagged 序列化，这样它不会在 JSON 中添加额外的标签
+pub enum DynamicPsnData {
+    Class(ClassData),
+    Lecturer(LecturerData),
+    PsnTraining(PsnTrainingData),
+    PsnArchive(PsnArchiveData),
+}
+
+impl DynamicPsnData {
+    // 辅助方法，根据枚举变体返回对应的动态键名
+    pub fn get_key_name(&self) -> &'static str {
+        match self {
+            DynamicPsnData::Class(_) => "classData",
+            DynamicPsnData::Lecturer(_) => "lecturerData",
+            DynamicPsnData::PsnTraining(_) => "psnTrainingData",
+            DynamicPsnData::PsnArchive(_) => "psnArchiveData",
+        }
+    }
 }

@@ -4,4 +4,5 @@ pub mod models;
 pub mod schedule;
 
 pub use web::WebServer;
-pub use models::psn_class::PsnClass;
+pub use models::train::ClassData;
+pub use models::train::DynamicPsnData;

@@ -1,12 +1,12 @@
 use crate::{
     web::models::{ApiResponse, QueryParams},
-    PsnClass,
+    ClassData,
 };
 use actix_web::{get, web, HttpResponse, Result};
-use sqlx::Execute;
-use sqlx::{MySql, MySqlPool, QueryBuilder};
 use serde_json::{json, Value};
+use sqlx::Execute;
 use sqlx::Row;
+use sqlx::{MySql, MySqlPool, QueryBuilder};
 
 #[get("/trains")]
 pub async fn get_trains(
@@ -41,13 +41,13 @@ pub async fn get_trains(
     }
 
     match query_builder
-        .build_query_as::<PsnClass>()
+        .build_query_as::<ClassData>()
         .fetch_all(pool.get_ref())
         .await
     {
-        Ok(trains) => Ok(HttpResponse::Ok().json(ApiResponse::<Vec<PsnClass>>::success(trains))),
+        Ok(trains) => Ok(HttpResponse::Ok().json(ApiResponse::<Vec<ClassData>>::success(trains))),
         Err(e) => Ok(HttpResponse::InternalServerError()
-            .json(ApiResponse::<Vec<PsnClass>>::error(e.to_string()))),
+            .json(ApiResponse::<Vec<ClassData>>::error(e.to_string()))),
     }
 }
 
@@ -72,7 +72,7 @@ pub async fn get_train_by_id(
             LEFT JOIN fz_train_trainlevel tl on tl.`CODE` = a.TRAINLEVEL
             LEFT JOIN fz_train_trainmode tm on tm.`CODE` = a.TRAINMODE
             LEFT JOIN fz_train_traincategory tc on tc.`CODE` = a.TRAINCATEGORY
-        WHERE a.TRAINID = ?"#
+        WHERE a.TRAINID = ?"#,
     )
     .bind(id.as_ref())
     .fetch_optional(pool.get_ref())
@@ -104,11 +104,13 @@ pub async fn get_train_by_id(
                 "scores": [85, 90, 95],
                 "empty_array": []
             });
-            
+
             // 将单个对象包装在数组中
             Ok(HttpResponse::Ok().json(ApiResponse::<Vec<Value>>::success(vec![train_data])))
-        },
-        Ok(None) => Ok(HttpResponse::NotFound().json(ApiResponse::<Vec<Value>>::error("Train not found".into()))),
-        Err(e) => Ok(HttpResponse::InternalServerError().json(ApiResponse::<Vec<Value>>::error(e.to_string())))
+        }
+        Ok(None) => Ok(HttpResponse::NotFound()
+            .json(ApiResponse::<Vec<Value>>::error("Train not found".into()))),
+        Err(e) => Ok(HttpResponse::InternalServerError()
+            .json(ApiResponse::<Vec<Value>>::error(e.to_string()))),
     }
 }
