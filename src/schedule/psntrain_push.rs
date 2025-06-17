@@ -3,7 +3,7 @@ use anyhow::{anyhow, Context, Result}; // 导入 anyhow::Result 和 Context trai
 use chrono::{Duration, Local};
 // 导入 log 宏
 use log::{error, info, warn};
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serde::Serialize;
 use serde_json::{from_str, json, Value};
 use sqlx::Execute;
@@ -121,27 +121,23 @@ impl PsntrainPushTask {
 
     // 将 send_psn_to_third_party 变为 PsntrainPushTask 的私有方法
     // 这样它就可以直接访问 self 的字段，而不需要将 mapper, client, config 等作为参数传递
-    async fn psn_dos_push(
-        &self,                     // 注意这里是 &self
-        psn_data: &DynamicPsnData, // 接受枚举类型
-    ) -> Result<()> {
-        // 记录请求尝试次数
+    async fn psn_dos_push(&self, psn_data: &DynamicPsnData) -> Result<()> {
         let mut request_attempt = 0;
-        // 限制最大重试次数，防止无限循环
         const MAX_RETRIES: u32 = 5;
-        // 动态获取键名
+
         let dynamic_key_name = psn_data.get_key_name();
-        // 动态构建 JSON 请求体
+
         let request_json_data_value = json!({
-            dynamic_key_name: [psn_data]// 直接序列化枚举变体
+            dynamic_key_name: [psn_data]
         });
 
         let request_json_data = serde_json::to_string(&request_json_data_value)
             .context("Failed to serialize dynamic JSON payload")?;
 
-        // 在这里声明，并在循环外部保留最终结果
-        let final_http_body_str: String; // <--- 声明为只在循环结束后赋值
-        loop {
+        let mut final_http_body_str: String = String::new(); // 最终的响应体
+
+        // 引入一个 Result 来封装循环体内的逻辑，以便统一错误处理
+        let result_of_send_loop: Result<(), anyhow::Error> = loop {
             request_attempt += 1;
             info!(
                 "Attempting to send data to {} (Attempt {}), key: {}",
@@ -149,7 +145,6 @@ impl PsntrainPushTask {
             );
 
             if request_attempt > 1 {
-                // 第一次发送前没有 Thread.sleep(20)，所以这里只在重试时睡眠
                 info!("********Resting 1 minute before retry********");
                 tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
             } else {
@@ -162,33 +157,62 @@ impl PsntrainPushTask {
                 .header("X-APP-ID", &self.mss_info_config.app_id)
                 .header("X-APP-KEY", &self.mss_info_config.app_key)
                 .header("Content-Type", "application/json")
-                .body(request_json_data.clone()); // 克隆请求体，以便重试时再次发送
+                .body(request_json_data.clone());
 
-            let response = request.send().await.context(format!(
-                "Failed to send HTTP request to {}",
-                self.mss_info_config.app_url
-            ))?;
+            let response_result = request.send().await;
 
-            let status = response.status();
-            // 直接在这里声明并赋值，它只在当前循环迭代中有效
-            let current_http_body_str = response
-                .text()
-                .await
-                .context("Failed to read response body")?;
+            let current_http_body_str: String;
+            let current_status: StatusCode;
+
+            match response_result {
+                Ok(response) => {
+                    current_status = response.status();
+                    match response.text().await {
+                        Ok(body) => current_http_body_str = body,
+                        Err(e) => {
+                            // 读取响应体失败
+                            error!(
+                                "Failed to read response body for {}: {:?}",
+                                self.mss_info_config.app_url, e
+                            );
+                            break Err(anyhow!(
+                                "Failed to read response body for {}: {:?}",
+                                self.mss_info_config.app_url,
+                                e
+                            ));
+                        }
+                    }
+                }
+                Err(e) => {
+                    // 发送请求失败 (网络不通, DNS 查找失败等)
+                    error!(
+                        "Failed to send HTTP request to {}: {:?}",
+                        self.mss_info_config.app_url, e
+                    );
+                    break Err(anyhow!(
+                        "Failed to send HTTP request to {}: {:?}",
+                        self.mss_info_config.app_url,
+                        e
+                    ));
+                }
+            }
 
             info!(
                 "Received response for {} (Attempt {}): Status={}, Body={}",
-                self.mss_info_config.app_url, request_attempt, status, current_http_body_str
+                self.mss_info_config.app_url,
+                request_attempt,
+                current_status,
+                current_http_body_str
             );
 
-            if status.is_success() {
+            if current_status.is_success() {
                 if have_rest(&current_http_body_str) {
                     if request_attempt >= MAX_RETRIES {
                         error!(
                             "Max retries reached. Still have 'rest' condition. Body: {}",
                             current_http_body_str
                         );
-                        return Err(anyhow!(
+                        break Err(anyhow!(
                             "Max retries reached for {}. Still requires rest.",
                             self.mss_info_config.app_url
                         ));
@@ -200,44 +224,75 @@ impl PsntrainPushTask {
                         "Request to {} successful and no 'rest' required.",
                         self.mss_info_config.app_url
                     );
-                    final_http_body_str = current_http_body_str; // <--- 赋值给最终变量
-                    break; // 成功并退出重试循环
+                    final_http_body_str = current_http_body_str; // 成功时赋值
+                    break Ok(()); // 成功并退出重试循环
                 }
             } else {
+                // HTTP 状态码表示失败
                 error!(
                     "HTTP request to {} failed with status: {}. Body: {}",
-                    self.mss_info_config.app_url, status, current_http_body_str
+                    self.mss_info_config.app_url, current_status, current_http_body_str
                 );
-                return Err(anyhow!(
+                break Err(anyhow!(
                     "HTTP request failed with status: {}. Body: {}",
-                    status,
+                    current_status,
                     current_http_body_str
                 ));
             }
-        }
-        // 循环结束后，这里才真正使用 final_http_body_str
-        let current_time = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-        let record_reply = RecordMssReply {
-            id: Uuid::new_v4().to_string().replace("-", ""),
-            datas: format!(
-                "X-APP_ID{}|X-APP-KEY{}|DATA:{}",
-                self.mss_info_config.app_id, self.mss_info_config.app_key, request_json_data
-            ),
-            send_time: current_time,
-            msg: final_http_body_str.clone(),
         };
 
-        // 直接通过 self 访问 archiving_mapper
-        self.archiving_mapper
-            .record_mss_reply(&record_reply)
-            .await
-            .context("Failed to record MSS reply")?;
+        // 统一的错误处理和记录逻辑
+        let current_time = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
-        // 直接通过 self 访问 push_result_parser
-        self.push_result_parser
-            .parse(&request_json_data, &final_http_body_str);
+        let primary_result = match result_of_send_loop {
+            Ok(_) => {
+                // 请求成功，记录成功信息
+                let record_reply = RecordMssReply {
+                    id: Uuid::new_v4().to_string().replace("-", ""),
+                    datas: format!(
+                        "X-APP_ID{}|X-APP-KEY{}|DATA:{}",
+                        self.mss_info_config.app_id,
+                        self.mss_info_config.app_key,
+                        request_json_data
+                    ),
+                    send_time: current_time,
+                    msg: final_http_body_str.clone(), // 成功时使用 final_http_body_str
+                };
+                // 尝试记录成功信息，如果记录失败，将记录的错误链到主结果上
+                self.archiving_mapper
+                    .record_mss_reply(&record_reply)
+                    .await
+                    .context("Failed to record SUCCESS MSS reply")?; // 使用 ? 传播数据库写入错误
 
-        Ok(())
+                // 只有成功时才调用 parser.parse
+                self.push_result_parser
+                    .parse(&request_json_data, &final_http_body_str);
+                Ok(()) // 主请求和记录都成功
+            }
+            Err(e) => {
+                // 请求失败，记录失败信息
+                let error_message = format!("ERROR: {:?}", e); // 捕获并格式化错误
+                error!(
+                    "Attempted to send data to third party failed: {}",
+                    error_message
+                );
+
+                let record_reply_error = RecordMssReply {
+                    id: Uuid::new_v4().to_string().replace("-", ""),
+                    datas: format!("sendDATA:{}", request_json_data), // 记录发送的数据
+                    send_time: current_time,
+                    msg: error_message, // 记录错误消息
+                };
+                // 尝试记录失败信息，如果记录失败，将记录的错误链到主结果上
+                self.archiving_mapper
+                    .record_mss_reply(&record_reply_error)
+                    .await
+                    .context("Failed to record FAILED MSS reply")?; // 使用 ? 传播数据库写入错误
+                                                                    // 返回原始的失败结果，以便 execute 方法能知道发生了错误
+                Err(e)
+            }
+        };
+        primary_result // 返回主结果，它包含了 send_loop 的结果以及记录的结果
     }
 }
 
