@@ -1,3 +1,3 @@
 pub mod psntrain_push;
 
-pub use psntrain_push::PsntrainPushTask;
+pub use psntrain_push::PsnTrainPushTask;

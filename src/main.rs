@@ -5,7 +5,7 @@ use log::{error, info, LevelFilter};
 //servicekit是crate 名称（在 Cargo.toml 中定义），代表了库。db::pool, schedule::PsntrainPushTask, WebServer 这些都是从 lib.rs 中 pub use 或 pub mod 导出的项。如果 lib.rs 不存在或者没有正确地导出这些模块，main.rs 将无法直接通过 servicekit:: 路径来访问它们
 use servicekit::{
     db::pool,
-    schedule::{psntrain_push::MssInfoConfig, PsntrainPushTask},
+    schedule::{psntrain_push::MssInfoConfig, PsnTrainPushTask},
     WebServer,
 };
 use std::io::Write; // 导入 Write trait，用于 format_timestamp 函数，writeln! 宏所需要的 trait
@@ -48,13 +48,13 @@ async fn main() -> Result<()> {
 
     // 定义第三方服务的配置
     let mss_info_config = MssInfoConfig::new(
-        "http://example.com/api/push_data".to_string(), // 你的实际 URL
-        "your_app_id".to_string(),                      // 你的实际 APP_ID
-        "your_app_key".to_string(),                     // 你的实际 APP_KEY
+        "http://10.141.134.30:12500/serviceAgent/rest/hrapi/HrTrainInfo/pushTrainingInfo".to_string(), // 你的实际 URL
+        "c17eb77644576d28251383c9fc25124d".to_string(),                      // 你的实际 APP_ID
+        "bf1685e2184903789d0be9a0f2c8b91f".to_string(),                     // 你的实际 APP_KEY
     );
 
     // 2. 创建你的任务实例，并用 Arc 包裹以便安全地在多线程间共享
-    let task = Arc::new(PsntrainPushTask::new(pool.clone(), mss_info_config));
+    let task = Arc::new(PsnTrainPushTask::new(pool.clone(), mss_info_config));
 
     // 3. 使用从 task 中获取的 cron 表达式来创建一个异步 Job
     // 3.1. 调用方法获取 cron 字符串，并立即使用 .to_string()

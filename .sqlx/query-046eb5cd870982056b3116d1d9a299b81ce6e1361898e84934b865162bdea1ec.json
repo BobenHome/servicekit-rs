@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\n            INSERT INTO mss_push_result (id, push_time, train_id, course_id, user_id, type, error_msg, error_code)\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "046eb5cd870982056b3116d1d9a299b81ce6e1361898e84934b865162bdea1ec"
+}
