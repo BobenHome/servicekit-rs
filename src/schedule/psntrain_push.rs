@@ -11,11 +11,13 @@ use sqlx::{MySql, MySqlPool, QueryBuilder};
 use uuid::Uuid;
 // 导入 PushResultParser
 use crate::parsers::push_result_parser::PushResultParser;
+// 导入 MssInfoConfig
+use crate::config::MssInfoConfig;
 
 pub struct PsnTrainPushTask {
     pub pool: MySqlPool,
     http_client: Client,
-    mss_info_config: MssInfoConfig,
+    pub mss_info_config: MssInfoConfig,
     archiving_mapper: ArchivingMssMapper,
     push_result_parser: PushResultParser,
 }
@@ -79,17 +81,11 @@ impl PsnTrainPushTask {
                 }
             }
         }
-        info!("PsntrainPushTask completed successfully.");
+        info!("PsnTrainPushTask completed successfully.");
         Ok(()) // 如果一切正常，返回 Ok(())
     }
 
-    // 我们保留这个方法，以便在 main.rs 中方便地获取 Cron 表达式
-    pub fn cron_expression(&self) -> &str {
-        // tokio-cron-scheduler 完美支持这种格式。
-        "0 */1 * * * *" // 每5分钟执行一次
-    }
-
-    // 将 send_psn_to_third_party 变为 PsntrainPushTask 的私有方法
+    // 将 psn_dos_push 变为 PsnTrainPushTask 的私有方法
     // 这样它就可以直接访问 self 的字段，而不需要将 mapper, client, config 等作为参数传递
     async fn psn_dos_push(&self, psn_data: &DynamicPsnData) -> Result<()> {
         let mut request_attempt = 0;
@@ -264,23 +260,6 @@ impl PsnTrainPushTask {
             }
         };
         primary_result // 返回主结果，它包含了 send_loop 的结果以及记录的结果
-    }
-}
-
-// Configuration for the third-party service
-pub struct MssInfoConfig {
-    pub app_url: String,
-    pub app_id: String,
-    pub app_key: String,
-}
-
-impl MssInfoConfig {
-    pub fn new(app_url: String, app_id: String, app_key: String) -> Self {
-        MssInfoConfig {
-            app_url,
-            app_id,
-            app_key,
-        }
     }
 }
 

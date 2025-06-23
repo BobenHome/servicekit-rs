@@ -23,7 +23,11 @@ cron = "0.15.0"
 tokio-cron-scheduler = "0.14.0"
 uuid = { version = "1.17.0", features = ["v4"] }
 anyhow = "1.0"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+reqwest = { version = "0.12", features = [
+    "json",
+    "rustls-tls",
+], default-features = false }
+config = "0.15"
 
 [[bin]]
 name = "servicekit"

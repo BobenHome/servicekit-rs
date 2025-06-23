@@ -1,0 +1,16 @@
+# 数据库配置
+database_url = "mysql://dxxy:dreamsoft@2020@172.25.1.65:33063/dxxy"
+
+# Web 服务器端口
+web_server_port = 8084
+
+# 所有任务的配置
+[tasks] # <--- 新增 tasks 段
+[tasks.psn_train_push] # <--- 针对 psn_train_push 任务的配置
+cron_schedule = "0 */1 * * * *" # 每分钟执行一次，根据你的需求调整
+
+# MSS 服务配置
+[mss_info_config]
+app_id = "c17eb77644576d28251383c9fc25124d"
+app_key = "bf1685e2184903789d0be9a0f2c8b91f"
+app_url = "http://10.141.134.30:12500/serviceAgent/rest/hrapi/HrTrainInfo/pushTrainingInfo" # 示例
