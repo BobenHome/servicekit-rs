@@ -18,7 +18,7 @@ impl PushResultParser {
     pub async fn parse(&self, data: &str, result: &str) {
         info!("Parsing push result: data='{}', result='{}'", data, result);
         let mut push_result = MssPushResult {
-            id: Uuid::new_v4().to_string().replace("-", ""),
+            id: Uuid::new_v4().to_string(),
             push_time: Local::now(),
             train_id: None,
             course_id: None,
