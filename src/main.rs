@@ -7,7 +7,7 @@ use servicekit::config::AppConfig;
 use servicekit::{db::pool, schedule::PsnTrainPushTask, WebServer};
 use std::io::Write; // 导入 Write trait，用于 format_timestamp 函数，writeln! 宏所需要的 trait
 use std::sync::Arc;
-use tokio_cron_scheduler::{Job, JobScheduler}; // 导入日志宏 // 导入 Local, Utc, TimeZone
+use tokio_cron_scheduler::{Job, JobScheduler};
 
 #[tokio::main]
 async fn main() -> Result<()> {
