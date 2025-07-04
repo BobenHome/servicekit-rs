@@ -1,31 +1,18 @@
 use anyhow::{Context, Result};
 use chrono::Local;
-use env_logger::Builder;
-use log::{error, info, LevelFilter};
+use log::{error, info};
 //servicekit是crate 名称（在 Cargo.toml 中定义），代表了库。db::pool, schedule::PsntrainPushTask, WebServer 这些都是从 lib.rs 中 pub use 或 pub mod 导出的项。如果 lib.rs 不存在或者没有正确地导出这些模块，main.rs 将无法直接通过 servicekit:: 路径来访问它们
 use servicekit::config::AppConfig;
+use servicekit::logging;
 use servicekit::{db::pool, schedule::PsnTrainPushTask, WebServer};
-use std::io::Write; // 导入 Write trait，用于 format_timestamp 函数，writeln! 宏所需要的 trait
 use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 1.初始化日志
-    Builder::new()
-        .filter_level(LevelFilter::Info) // 设置日志级别为 Info
-        .format(|buf, record| {
-            writeln!(
-                buf,
-                "{} [{}] {}:{} - {}", // 格式：[本地时间] [级别] 模块::方法:行号 - 消息
-                Local::now().format("%Y-%m-%d %H:%M:%S%.3f"), // 精确到毫秒的本地时间
-                record.level(),
-                record.module_path().unwrap_or("unknown"), // 获取模块路径
-                record.line().unwrap_or(0),                // 获取行号
-                record.args()                              // 实际的日志消息
-            )
-        })
-        .init(); // 初始化 env_logger
+    // 1. 初始化日志系统
+    logging::init_logging().context("Failed to initialize logging")?;
+
     info!("Application starting...");
 
     // 2. 加载应用程序配置

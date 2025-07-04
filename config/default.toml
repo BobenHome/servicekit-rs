@@ -7,7 +7,7 @@ web_server_port = 8084
 # 所有任务的配置
 [tasks] # <--- 新增 tasks 段
 [tasks.psn_train_push] # <--- 针对 psn_train_push 任务的配置
-cron_schedule = "0 */1 * * * *" # 每分钟执行一次，根据你的需求调整
+cron_schedule = "0 0 */1 * * *" # 每分钟执行一次，根据你的需求调整
 
 # MSS 服务配置
 [mss_info_config]

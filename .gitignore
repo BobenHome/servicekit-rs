@@ -1,2 +1,14 @@
 /target
 .vscode
+/logs
+.DS_Store
+.idea
+*.iml
+*.log
+*.class
+*.jar
+*.war
+*.ear
+*.swp
+*.swo
+*.tmp
