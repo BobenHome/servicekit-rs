@@ -39,8 +39,9 @@ impl io::Write for LogFileWriter {
 /// 实现 `MakeWriter` 特性，用于自定义文件写入和轮转逻辑。
 struct LocalTimeRollingWriter {
     active_file: Arc<Mutex<File>>,
-    current_day: Mutex<u32>, // 存储当前是哪一天 (月份中的日期)
+    last_rotation_day: Mutex<u32>, // 存储上次轮转发生的日期（天数）
     log_dir: PathBuf,
+    // current_log_file_name: Mutex<String>, // 可以考虑存储当前文件名，但我们通过 current_day 来判断更简洁
 }
 
 impl LocalTimeRollingWriter {
@@ -52,46 +53,91 @@ impl LocalTimeRollingWriter {
         let now = Local::now();
         let current_day = now.day(); // 依赖 Datelike
 
-        let file_path = Self::get_daily_log_path(&log_path, &now);
+        // 在初始化时，我们仍然尝试直接打开 app.log
+        // 确保 initial_file 的路径是 `app.log`
+        let initial_file_path = log_path.join("app.log");
+        // 在打开之前，先尝试处理可能的旧 app.log 文件
+        Self::archive_old_app_log_if_needed(&log_path, &now)?;
 
         let file = OpenOptions::new()
             .create(true)
             .append(true) // 追加模式
-            .open(&file_path)
-            .context(format!("Failed to open initial log file: {:?}", file_path))?;
+            .open(&initial_file_path)
+            .context(format!(
+                "Failed to open initial log file: {:?}",
+                initial_file_path
+            ))?;
 
         Ok(LocalTimeRollingWriter {
             active_file: Arc::new(Mutex::new(file)),
-            current_day: Mutex::new(current_day),
+            last_rotation_day: Mutex::new(current_day),
             log_dir: log_path,
         })
     }
 
-    // 根据本地日期生成日志文件路径
-    fn get_daily_log_path(base_dir: &Path, now: &chrono::DateTime<Local>) -> PathBuf {
-        let file_name = format!("app.{}.log", now.format("%Y-%m-%d"));
+    // 在打开 app.log 之前，检查并归档昨天的 app.log
+    fn archive_old_app_log_if_needed(log_dir: &Path, now: &chrono::DateTime<Local>) -> Result<()> {
+        let app_log_path = log_dir.join("app.log");
+
+        println!("INFO: Checking for old app.log at {:?}", app_log_path);
+
+        if app_log_path.exists() {
+            let metadata = fs::metadata(&app_log_path)
+                .context(format!("Failed to read metadata for {:?}", app_log_path))?;
+            let modified_time = metadata.modified().context(format!(
+                "Failed to get modified time for {:?}",
+                app_log_path
+            ))?;
+
+            let local_modified_time: chrono::DateTime<Local> = modified_time.into();
+            let today_date = now.date_naive();
+            let modified_date = local_modified_time.date_naive();
+
+            // 如果 app.log 的修改日期是昨天或更早，就归档它
+            if modified_date < today_date {
+                let archive_path = Self::get_archive_log_path(log_dir, &modified_date);
+                println!(
+                    "INFO: Archiving old app.log from {} to {:?}",
+                    modified_date.format("%Y-%m-%d"),
+                    archive_path
+                );
+                fs::rename(&app_log_path, &archive_path).context(format!(
+                    "Failed to rename old app.log from {:?} to {:?}",
+                    app_log_path, archive_path
+                ))?;
+            }
+        }
+        Ok(())
+    }
+
+    // 辅助函数：根据日期获取归档文件名，例如 app.2025-07-04.log
+    fn get_archive_log_path(base_dir: &Path, date: &chrono::NaiveDate) -> PathBuf {
+        let file_name = format!("app.{}.log", date.format("%Y-%m-%d"));
         base_dir.join(file_name)
     }
 
-    // Handles the rotation logic internally.
-    // If opening the new file fails, it logs the error but *does not* replace
-    // the current active_file. This means logs will continue to go to the old file.
+    // 处理轮转逻辑。
+    // 如果打开新文件失败，它会记录错误，但不会替换当前的 active_file。
+    // 这意味着日志将继续写入到旧文件中。
     fn ensure_current_file_is_correct(&self) -> Result<()> {
-        // Returns anyhow::Result
         let now = Local::now();
         let today = now.day();
 
-        let mut current_day_guard = self.current_day.lock().unwrap();
+        let mut last_rotation_day_guard = self.last_rotation_day.lock().unwrap();
 
         // 每日轮转逻辑
-        if *current_day_guard != today {
+        if *last_rotation_day_guard != today {
             println!(
                 "INFO: Daily log rotation triggered. Old day: {}, New day: {}",
-                *current_day_guard, today
+                *last_rotation_day_guard, today
             );
-            *current_day_guard = today; // 更新记录的日期
+            *last_rotation_day_guard = today; // 更新记录的日期
 
-            let new_file_path = Self::get_daily_log_path(&self.log_dir, &now);
+            // 在打开新的 app.log 之前，先归档旧的 app.log (如果需要)
+            // 这里传递 `now` 的日期部分，以确保归档文件名为今天的日期
+            Self::archive_old_app_log_if_needed(&self.log_dir, &now)?;
+
+            let new_file_path = self.log_dir.join("app.log"); // 新文件始终是 app.log
 
             match OpenOptions::new()
                 .create(true)
