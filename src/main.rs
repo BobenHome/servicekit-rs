@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
     let server = WebServer::new(app_config.web_server_port, pool);
     server.start().await.context("Failed to start web server")?;
 
-    info!("Web Server started and application running.");
+    info!("Application shut down cleanly.");
 
     // main 函数的 Result 成功变体
     Ok(())

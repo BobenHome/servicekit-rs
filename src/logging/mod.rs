@@ -192,10 +192,10 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LocalTimeRollingWriter {
 /// - 文件输出层，按天轮转，使用本地时间命名日志文件，并包含详细日志信息。
 /// - 注意：此自定义实现目前只支持按天轮转，不包含按文件大小切分。
 pub fn init_logging() -> Result<()> {
-    // 创建自定义的本地时间滚动文件写入器
+    // 1. 创建自定义的本地时间滚动文件写入器
     let custom_file_writer = LocalTimeRollingWriter::new("logs")?;
 
-    // 创建一个 fmt 层用于文件输出
+    // 2. 创建一个 fmt 层用于文件输出
     let file_layer = fmt::layer()
         .with_ansi(false) // 文件输出通常不需要 ANSI 颜色
         .with_writer(custom_file_writer) // 使用自定义写入器
@@ -208,7 +208,7 @@ pub fn init_logging() -> Result<()> {
         .with_level(true)
         .with_filter(EnvFilter::new("info"));
 
-    // 创建一个 fmt 层用于控制台输出
+    // 3. 创建一个 fmt 层用于控制台输出
     let stdout_layer = fmt::layer()
         .with_ansi(true) // 控制台输出可以有颜色
         .with_timer(LocalTimer)
@@ -219,7 +219,7 @@ pub fn init_logging() -> Result<()> {
         .with_level(true)
         .with_filter(EnvFilter::new("info"));
 
-    // 将两个层组合起来并初始化全局订阅者
+    // 4. 将两个层组合起来并初始化全局订阅者
     tracing_subscriber::registry()
         .with(stdout_layer)
         .with(file_layer)
