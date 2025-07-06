@@ -3,7 +3,7 @@ use chrono::Local;
 use tracing::{error, info};
 //servicekit是crate 名称（在 Cargo.toml 中定义），代表了库。db::pool, schedule::PsntrainPushTask, WebServer 这些都是从 lib.rs 中 pub use 或 pub mod 导出的项。如果 lib.rs 不存在或者没有正确地导出这些模块，main.rs 将无法直接通过 servicekit:: 路径来访问它们
 use servicekit::config::AppConfig;
-use servicekit::schedule::PsnLecturerPushTask;
+use servicekit::schedule::{CompositeTask, PsnLecturerPushTask};
 use servicekit::{db::pool, schedule::PsnTrainPushTask, WebServer};
 use servicekit::{logging, TaskExecutor};
 use std::sync::Arc;
@@ -36,30 +36,37 @@ async fn main() -> Result<()> {
         .context("Failed to create scheduler")?;
     info!("Scheduler initialized.");
 
-    // 5. 创建 PsnTrainPushTask 实例（主任务）
+    // 5. 创建 PsnTrainPushTask 实例
     // 使用从配置中读取的第三方配置
     let push_train_task = Arc::new(PsnTrainPushTask::new(
         pool.clone(),
         app_config.mss_info_config.clone(),
     ));
 
-    // 6. 创建 PsnLecturerPushTask 实例 (依赖任务)
+    // 6. 创建 PsnLecturerPushTask 实例
     let push_lecturer_task = Arc::new(PsnLecturerPushTask::new(
         pool.clone(),
         app_config.mss_info_config.clone(),
     ));
 
-    // 7. 使用辅助函数创建并添加 PsnTrainPushTask 的 Cron Job
-    // 将 PsnLecturerPushTask 作为其依赖任务传入
+    // --- 将需要串行执行的任务打包进 Vec ---
+    let composite_tasks: Vec<Arc<dyn TaskExecutor + Send + Sync + 'static>> =
+        vec![push_train_task, push_lecturer_task];
+    // --- 创建 CompositeTask 实例 ---
+    let main_scheduled_composite_task = Arc::new(CompositeTask::new(
+        composite_tasks,
+        "培训班数据归档到MSS".to_string(),
+    ));
+
+    // 7. 使用辅助函数创建并添加 CompositeTask 的 Cron Job
     create_and_schedule_task_job(
         &scheduler,
-        push_train_task, // Arc<PsnTrainPushTask> 会自动转换为 Arc<dyn TaskExecutor>
+        main_scheduled_composite_task, // Arc<CompositeTask> 会自动转换为 Arc<dyn TaskExecutor>
         app_config.tasks.psn_push.cron_schedule.as_str(),
-        "PsnTrainPushTask",
-        vec![push_lecturer_task], // 作为依赖任务传入
+        "PsnPushTask",
+        vec![], // 作为依赖任务传入
     )
     .await?;
-    info!("PsnLecturerPushTask will run as a dependent task of PsnTrainPushTask on each successful execution.");
 
     // 8. 在后台启动调度器，这样它就不会阻塞 Web 服务器的启动
     tokio::spawn(async move {

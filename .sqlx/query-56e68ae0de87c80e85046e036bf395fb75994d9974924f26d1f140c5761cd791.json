@@ -1,6 +1,6 @@
 {
   "db_name": "MySQL",
-  "query": "-- name: get_lecturer_list\n-- 获取讲师信息\nSELECT\n    a.ID AS _id,\n    a.ID AS id,\n    a.DATASTATE AS operation,\n    a.trainid AS training_id,\n    tt.`NAME` AS lecturer_type,\n    a.`COURSEID` AS course_id,\n    a.coursename AS course_name,\n    a.COURSETIME AS course_time,\n    case when a.COURSEASSESS is null then '5.00' else a.COURSEASSESS end as course_assess,\n    date_format(a.startdate ,'%Y-%m-%d %H:%i:%s' ) AS start_date,\n    date_format(a.enddate ,'%Y-%m-%d %H:%i:%s') AS end_date,\n    b.MSS_HRCODE AS user_id,\n    b.NAME_CARD_NAME AS user_name,\n    b.MSS_JOBCATEGORY AS job_category\nFROM\n    nu_traincoursedata_xzs_hyk a\n    INNER JOIN nu_trainsourcedata_xzs_hyk T ON T.id=A.TRAINID\n    LEFT JOIN mc_user_ztk b ON a.userid = b.id\n    LEFT JOIN fz_trainner_type tt on tt.`CODE`=a.LECTURERTYPE\n    left join fz_train_traintype ttt on ttt.`CODE`=T.TRAINTYPE\nWHERE\n    a.COURSETIME > 0",
+  "query": "-- name: get_lecturer_list\n-- 获取讲师信息\nSELECT\n    a.ID AS _id,\n    a.ID AS id,\n    a.DATASTATE AS operation,\n    a.trainid AS training_id,\n    tt.`NAME` AS lecturer_type,\n    a.`COURSEID` AS course_id,\n    a.coursename AS course_name,\n    a.COURSETIME AS course_time,\n    case when a.COURSEASSESS is null then '5.00' else a.COURSEASSESS end as course_assess,\n    date_format(a.startdate ,'%Y-%m-%d %H:%i:%s' ) AS start_date,\n    date_format(a.enddate ,'%Y-%m-%d %H:%i:%s') AS end_date,\n    b.MSS_HRCODE AS user_id,\n    b.NAME_CARD_NAME AS user_name,\n    b.MSS_JOBCATEGORY AS job_category,\n    '已开课' AS course_status\nFROM\n    nu_traincoursedata_xzs_hyk a\n    INNER JOIN nu_trainsourcedata_xzs_hyk T ON T.id=A.TRAINID\n    LEFT JOIN mc_user_ztk b ON a.userid = b.id\n    LEFT JOIN fz_trainner_type tt on tt.`CODE`=a.LECTURERTYPE\n    left join fz_train_traintype ttt on ttt.`CODE`=T.TRAINTYPE\nWHERE\n    a.COURSETIME > 0",
   "describe": {
     "columns": [
       {
@@ -128,6 +128,15 @@
           "flags": "",
           "max_size": 1020
         }
+      },
+      {
+        "ordinal": 14,
+        "name": "course_status",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL",
+          "max_size": 12
+        }
       }
     ],
     "parameters": {
@@ -147,8 +156,9 @@
       true,
       true,
       true,
-      true
+      true,
+      false
     ]
   },
-  "hash": "3ef3e9b4f50ddb566820ff00e73ae96d6d7f2f4f797f9dfc3d6677363efb3207"
+  "hash": "56e68ae0de87c80e85046e036bf395fb75994d9974924f26d1f140c5761cd791"
 }
