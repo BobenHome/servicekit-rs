@@ -10,12 +10,12 @@ pub struct AppConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct TasksConfig {
-    pub psn_train_push: PsnTrainPushTaskConfig, // <--- 示例：针对 PsntrainPushTask 的配置
-                                                // pub another_task: AnotherTaskConfig, // <--- 如果有其他任务，可以在这里添加
+    pub psn_push: PsnPushTaskConfig, // <--- 示例：针对 PsnPushTaskConfig 的配置
+                                     // pub another_task: AnotherTaskConfig, // <--- 如果有其他任务，可以在这里添加
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct PsnTrainPushTaskConfig {
+pub struct PsnPushTaskConfig {
     pub cron_schedule: String, // <--- 将 cron_schedule 移到任务自己的配置中
 }
 

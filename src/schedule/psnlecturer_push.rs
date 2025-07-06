@@ -1,22 +1,19 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::mappers::archiving_mss_mapper::ArchivingMssMapper;
-use crate::{ClassData, DynamicPsnData, TaskExecutor};
-use anyhow::{Context, Result}; // 导入 anyhow::Result 和 Context trait
+use anyhow::{Context, Result};
 use chrono::{Duration, Local};
-// 导入 log 宏
-use log::{error, info};
 use reqwest::Client;
 use sqlx::Execute;
 use sqlx::{MySql, MySqlPool, QueryBuilder};
-// 导入 PushResultParser
-use crate::parsers::push_result_parser::PushResultParser;
-// 导入 MssInfoConfig
-use crate::config::MssInfoConfig;
-use crate::utils::mss_client::psn_dos_push;
+use tracing::{error, info};
 
-pub struct PsnTrainPushTask {
+use crate::utils::mss_client::psn_dos_push;
+use crate::{
+    ArchivingMssMapper, DynamicPsnData, LecturerData, MssInfoConfig, PushResultParser, TaskExecutor,
+};
+
+pub struct PsnLecturerPushTask {
     pub pool: MySqlPool,
     http_client: Client,
     pub mss_info_config: MssInfoConfig,
@@ -24,49 +21,47 @@ pub struct PsnTrainPushTask {
     push_result_parser: PushResultParser,
 }
 
-impl PsnTrainPushTask {
+impl PsnLecturerPushTask {
     pub fn new(pool: MySqlPool, config: MssInfoConfig) -> Self {
-        PsnTrainPushTask {
-            // pool 的所有权在这里被 ArchivingMssMapper 拿走了一部分，
-            // 但 MySqlPool 是可克隆的，所以可以为 mapper 克隆一份
+        PsnLecturerPushTask {
             http_client: Client::new(),
             mss_info_config: config,
-            archiving_mapper: ArchivingMssMapper::new(pool.clone()), // 克隆 pool 给 mapper
+            archiving_mapper: ArchivingMssMapper::new(pool.clone()),
             push_result_parser: PushResultParser::new(pool.clone()),
-            pool, // PsntrainPushTask 自身也需要持有 pool，用于 execute 方法中的查询
+            pool,
         }
     }
 
     pub async fn execute_internal(&self) -> Result<()> {
         info!(
-            "Running task via tokio-cron-scheduler at: {}",
+            "Running PsnLecturerPushTask task via tokio-cron-scheduler at: {}",
             Local::now().format("%Y-%m-%d %H:%M:%S")
         );
-
         let mut query_builder =
-            QueryBuilder::<MySql>::new(sqlx::query_file!("queries/trains.sql").sql());
+            QueryBuilder::<MySql>::new(sqlx::query_file!("queries/lecturers.sql").sql());
 
         let today = Local::now().date_naive();
         let yesterday = today - Duration::days(1);
         let hit_date = yesterday.format("%Y-%m-%d").to_string();
 
-        query_builder.push(" AND a.hitdate = ");
+        query_builder.push(" AND T.hitdate = ");
         query_builder.push_bind(&hit_date);
         query_builder.push(" LIMIT 1 ");
 
-        let class_datas = query_builder
-            .build_query_as::<ClassData>()
+        let lecturer_datas = query_builder
+            .build_query_as::<LecturerData>()
             .fetch_all(&self.pool)
             .await
-            .context("Failed to fetch trains from database")?; // 将数据库错误转换为 anyhow::Error 并添加上下文
+            .context("Failed to fetch lecturer data from database")?;
 
-        if class_datas.is_empty() {
-            info!("No trains found for hitdate: {}", hit_date);
+        if lecturer_datas.is_empty() {
+            info!("No lecturers found for hitdate: {}", hit_date);
         } else {
-            for class_data in class_datas {
-                info!("Found class_data: {:?}", class_data);
-                // 将 ClassData 包装到枚举中
-                let psn_data_enum = DynamicPsnData::Class(class_data);
+            for lecturer_data in lecturer_datas {
+                info!("Found lecturer_data: {:?}", lecturer_data);
+                // 将 lecturer_data 包装到枚举中
+                let psn_data_enum = DynamicPsnData::Lecturer(lecturer_data);
+                // 调用通用的 psn_dos_push 函数，传递 self 的引用和数据
                 if let Err(e) = psn_dos_push(
                     &self.http_client,
                     &self.mss_info_config,
@@ -89,13 +84,14 @@ impl PsnTrainPushTask {
                 }
             }
         }
-        info!("PsnTrainPushTask completed successfully.");
-        Ok(()) // 如果一切正常，返回 Ok(())
+        info!("PsnLecturerPushTask completed successfully.");
+
+        Ok(())
     }
 }
 
 // 实现 TaskExecutor trait
-impl TaskExecutor for PsnTrainPushTask {
+impl TaskExecutor for PsnLecturerPushTask {
     fn execute(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         Box::pin(self.execute_internal()) // 在这里调用实际的异步方法
     }

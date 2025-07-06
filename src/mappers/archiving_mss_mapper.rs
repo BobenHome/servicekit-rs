@@ -22,7 +22,7 @@ impl ArchivingMssMapper {
     }
 
     pub async fn record_mss_reply(&self, reply: &RecordMssReply) -> Result<()> {
-        info!("Recording MSS reply to DB: {:?}", reply);
+        info!("Recording MSS reply to DB: {:?}", reply.id);
         // 使用 sqlx::query! 或 sqlx::query_as! 进行插入
         // 这里是关键：明确指定数据库列名
         sqlx::query!(

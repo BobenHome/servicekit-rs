@@ -56,12 +56,60 @@ pub struct ClassData {
 }
 
 // 示例：讲师数据结构体
-#[derive(Debug, FromRow, Serialize, Deserialize, Clone)]
+#[derive(Debug, FromRow, Serialize, Deserialize, Clone, Default)]
+#[serde(default)] // 自动处理缺失字段的默认值
 pub struct LecturerData {
-    pub lecturer_id: i32,
-    pub lecturer_name: String,
-    pub expertise: String,
-    // ... 讲师相关的字段
+    pub _id: String,
+    /// 业务主键
+    pub id: String,
+    /// 数据状态
+    pub operation: String,
+    /// 培训班id
+    #[serde(rename = "trainingId")]
+    pub training_id: String,
+    /// hr传输数据人员编码
+    #[serde(rename = "userId")]
+    pub user_id: String,
+    /// 真实姓名
+    pub user_name: String,
+    /// 讲师分类
+    pub lecturer_type: String,
+    /// 课程id
+    pub course_id: String,
+    /// 课程名称
+    pub course_name: String,
+    /// 课程时长
+    pub course_time: Option<Decimal>,
+    /// 授课质量评估分
+    pub course_assess: String,
+    /// 开始时间
+    pub start_date: String,
+    /// 结束时间
+    pub end_date: String,
+    /// 员工类别
+    #[serde(rename = "jobCategory")]
+    pub job_category: String,
+    /// 课程状态 (默认值: "已开课")
+    #[serde(default = "default_course_status")]
+    pub course_status: String,
+}
+
+// 为 course_status 提供默认值函数
+fn default_course_status() -> String {
+    "已开课".to_string()
+}
+
+// 实现 operation 的业务逻辑方法
+impl LecturerData {
+    pub fn get_operation(&self) -> &str {
+        if self.operation.is_empty() {
+            "add"
+        } else if self.operation.eq_ignore_ascii_case("update") {
+            "add"
+        } else {
+            &self.operation
+        }
+    }
 }
 
 // 示例：培训数据结构体
