@@ -9,7 +9,6 @@ pub struct ClassData {
     pub operation: String,
     #[serde(rename = "trainingId")]
     pub training_id: String,
-    #[serde(rename = "trainingName")]
     pub training_name: String,
     pub train_level: Option<String>,
     pub train_mode: Option<String>,
@@ -90,13 +89,7 @@ pub struct LecturerData {
     #[serde(rename = "jobCategory")]
     pub job_category: String,
     /// 课程状态 (默认值: "已开课")
-    #[serde(default = "default_course_status")]
     pub course_status: String,
-}
-
-// 为 course_status 提供默认值函数
-fn default_course_status() -> String {
-    "已开课".to_string()
 }
 
 // 实现 operation 的业务逻辑方法

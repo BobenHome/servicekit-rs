@@ -14,7 +14,8 @@ SELECT
     date_format(a.enddate ,'%Y-%m-%d %H:%i:%s') AS end_date,
     b.MSS_HRCODE AS user_id,
     b.NAME_CARD_NAME AS user_name,
-    b.MSS_JOBCATEGORY AS job_category
+    b.MSS_JOBCATEGORY AS job_category,
+    '已开课' AS course_status
 FROM
     nu_traincoursedata_xzs_hyk a
     INNER JOIN nu_trainsourcedata_xzs_hyk T ON T.id=A.TRAINID

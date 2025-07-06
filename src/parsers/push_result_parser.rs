@@ -16,7 +16,7 @@ impl PushResultParser {
         }
     }
     pub async fn parse(&self, data: &str, result: &str) {
-        info!("Parsing push result");
+        info!("Parsing push result beginning");
         let mut push_result = MssPushResult {
             id: Uuid::new_v4().to_string(),
             push_time: Local::now(),
@@ -232,5 +232,7 @@ impl PushResultParser {
         {
             error!("Failed to record failed push result: {:?}", record_err);
         }
+
+        info!("Parsing push result completed. Result ID: {}", push_result.id);
     }
 }

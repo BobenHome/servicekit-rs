@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::Local;
-use log::{error, info};
+use tracing::{error, info};
 //servicekit是crate 名称（在 Cargo.toml 中定义），代表了库。db::pool, schedule::PsntrainPushTask, WebServer 这些都是从 lib.rs 中 pub use 或 pub mod 导出的项。如果 lib.rs 不存在或者没有正确地导出这些模块，main.rs 将无法直接通过 servicekit:: 路径来访问它们
 use servicekit::config::AppConfig;
 use servicekit::schedule::PsnLecturerPushTask;
@@ -36,37 +36,32 @@ async fn main() -> Result<()> {
         .context("Failed to create scheduler")?;
     info!("Scheduler initialized.");
 
-    // 5. 创建 PsnTrainPushTask 实例
+    // 5. 创建 PsnTrainPushTask 实例（主任务）
     // 使用从配置中读取的第三方配置
     let push_train_task = Arc::new(PsnTrainPushTask::new(
         pool.clone(),
         app_config.mss_info_config.clone(),
     ));
 
-    // 6. 使用辅助函数创建并添加 PsnTrainPushTask 的 Cron Job
-    create_and_schedule_task_job(
-        &scheduler,
-        push_train_task,
-        app_config.tasks.psn_push.cron_schedule.as_str(),
-        "PsnTrainPushTask",
-    )
-    .await?; // 使用 ? 传播错误
-
-    // 7. 创建 PsnLecturerPushTask 实例
+    // 6. 创建 PsnLecturerPushTask 实例 (依赖任务)
     let push_lecturer_task = Arc::new(PsnLecturerPushTask::new(
         pool.clone(),
         app_config.mss_info_config.clone(),
     ));
-    // 8. 使用辅助函数创建并添加 PsnLecturerPushTask 的 Cron Job
+
+    // 7. 使用辅助函数创建并添加 PsnTrainPushTask 的 Cron Job
+    // 将 PsnLecturerPushTask 作为其依赖任务传入
     create_and_schedule_task_job(
         &scheduler,
-        push_lecturer_task,
+        push_train_task, // Arc<PsnTrainPushTask> 会自动转换为 Arc<dyn TaskExecutor>
         app_config.tasks.psn_push.cron_schedule.as_str(),
-        "PsnLecturerPushTask",
+        "PsnTrainPushTask",
+        vec![push_lecturer_task], // 作为依赖任务传入
     )
-    .await?; // 使用 ? 传播错误
+    .await?;
+    info!("PsnLecturerPushTask will run as a dependent task of PsnTrainPushTask on each successful execution.");
 
-    // 9. 在后台启动调度器，这样它就不会阻塞 Web 服务器的启动
+    // 8. 在后台启动调度器，这样它就不会阻塞 Web 服务器的启动
     tokio::spawn(async move {
         info!("Attempting to start scheduler in background...");
         // 显式处理 scheduler.start().await 的 Result
@@ -88,58 +83,101 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-// 定义一个通用的辅助函数，用于创建和调度任务 Job
 // 这个函数接收一个实现了 TaskExecutor trait 的任务实例
-async fn create_and_schedule_task_job<T>(
+// 辅助函数：创建并调度一个任务的 Cron Job
+async fn create_and_schedule_task_job(
     scheduler: &JobScheduler,
-    task: Arc<T>,
-    schedule_str: &str,
-    task_name: &str,
-) -> Result<()>
-where
-    T: TaskExecutor, // T 必须实现 TaskExecutor
-{
-    let job_name_for_context = task_name.to_string(); // 用于在闭包中捕获任务名称
-    let job = Job::new_async(schedule_str, move |uuid, mut scheduler_clone| {
-        let task_clone = Arc::clone(&task); // 克隆 Arc 以在异步闭包中使用
-        let job_name_inner = job_name_for_context.clone(); // 再次克隆任务名称
+    primary_task: Arc<dyn TaskExecutor + Send + Sync + 'static>, // 主任务
+    cron_schedule: &str,
+    job_name: &str,
+    dependent_tasks: Vec<Arc<dyn TaskExecutor + Send + Sync + 'static>>, // 依赖任务
+) -> Result<()> {
+    let primary_task_clone = Arc::clone(&primary_task);
+    let job_name_clone = job_name.to_string();
+
+    // 克隆依赖任务（如果存在）给 Job 闭包
+    let dependent_tasks_clone_for_job = dependent_tasks.clone();
+
+    let job = Job::new_async(cron_schedule, move |uuid, mut scheduler| {
+        let primary_task_for_future = Arc::clone(&primary_task_clone);
+        let job_name_for_future = job_name_clone.clone();
+        // 克隆依赖任务给 inner async block
+        let dependent_tasks_for_future = dependent_tasks_clone_for_job.clone();
 
         Box::pin(async move {
-            info!("Job '{}' ({:?}) is running.", job_name_inner, uuid);
-            let next_scheduled_time_str = match scheduler_clone.next_tick_for_job(uuid).await {
-                Ok(Some(ts)) => ts
+            let next_scheduled_time_str = match scheduler.next_tick_for_job(uuid).await {
+                Ok(Some(dt)) => dt
                     .with_timezone(&Local)
                     .format("%Y-%m-%d %H:%M:%S")
                     .to_string(),
-                Ok(None) => "No next scheduled time".to_string(),
+                Ok(None) => "No next tick".to_string(),
                 Err(e) => {
-                    error!(
-                        "Error getting next tick for job '{}' ({:?}): {:?}",
-                        job_name_inner, uuid, e
-                    );
+                    error!("Error getting next tick for job {:?}: {:?}", uuid, e);
                     "Error getting next tick".to_string()
                 }
             };
             info!(
-                "Job '{}' ({:?}) is running. Next scheduled time (local): {:?}\n",
-                job_name_inner, uuid, next_scheduled_time_str
+                "Job '{}' ({:?}) is running. Next scheduled time (local): {}",
+                job_name_for_future, uuid, next_scheduled_time_str
             );
-            if let Err(e) = task_clone.execute().await {
-                // 调用 TaskExecutor trait 的 execute 方法
+
+            // --- 执行主任务 ---
+            if let Err(e) = primary_task_for_future.execute().await {
                 error!(
-                    "Error executing job '{}' ({:?}) execution: {:?}",
-                    job_name_inner, uuid, e
+                    "Error executing primary job '{}' {:?}: {:?}",
+                    job_name_for_future, uuid, e
                 );
+            } else {
+                info!(
+                    "Primary job '{}' ({:?}) completed successfully.",
+                    job_name_for_future, uuid
+                );
+                // --- 遍历并执行所有依赖任务 ---
+                if dependent_tasks_for_future.is_empty() {
+                    info!(
+                        "No dependent tasks to execute for '{}'.",
+                        job_name_for_future
+                    );
+                } else {
+                    info!(
+                        "Starting {} dependent tasks for '{}'.",
+                        dependent_tasks_for_future.len(),
+                        job_name_for_future
+                    );
+                    for (i, dep_task) in dependent_tasks_for_future.iter().enumerate() {
+                        info!(
+                            "Executing dependent task #{} for '{}'.",
+                            i + 1,
+                            job_name_for_future
+                        );
+                        // 依赖任务本身会打印其执行状态的日志
+                        if let Err(e) = dep_task.execute().await {
+                            error!(
+                                "Error executing dependent task #{} for '{}': {:?}",
+                                i + 1,
+                                job_name_for_future,
+                                e
+                            );
+                            // 如果某个依赖任务失败，你可以选择是中断后续依赖任务，还是继续
+                            // 这里我们选择继续执行其他依赖任务，但会记录错误
+                        } else {
+                            info!(
+                                "Dependent task #{} for '{}' completed successfully.",
+                                i + 1,
+                                job_name_for_future
+                            );
+                        }
+                    }
+                }
             }
         })
     })
-    .context(format!("Failed to create {} cron job", task_name))?; // 更具体的错误上下文
+    .context(format!("Failed to create cron job '{}'", job_name))?;
 
     scheduler
         .add(job)
         .await
-        .context(format!("Failed to add {} job to scheduler", task_name))?; // 更具体的错误上下文
-
-    info!("{} cron job created and added to scheduler.", task_name);
+        .context(format!("Failed to add job '{}' to scheduler", job_name))?;
+    info!("Job '{}' added to scheduler.", job_name);
     Ok(())
 }
