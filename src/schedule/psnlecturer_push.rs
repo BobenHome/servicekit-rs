@@ -19,6 +19,7 @@ pub struct PsnLecturerPushTask {
     pub mss_info_config: MssInfoConfig,
     archiving_mapper: ArchivingMssMapper,
     push_result_parser: PushResultParser,
+    pub task_name: String,
 }
 
 impl PsnLecturerPushTask {
@@ -29,12 +30,14 @@ impl PsnLecturerPushTask {
             archiving_mapper: ArchivingMssMapper::new(pool.clone()),
             push_result_parser: PushResultParser::new(pool.clone()),
             pool,
+            task_name: "PsnLecturerPushTask".to_string(),
         }
     }
 
     pub async fn execute_internal(&self) -> Result<()> {
         info!(
-            "Running PsnLecturerPushTask task via tokio-cron-scheduler at: {}",
+            "Running {} via tokio-cron-scheduler at: {}",
+            self.name(),
             Local::now().format("%Y-%m-%d %H:%M:%S")
         );
         let mut query_builder =
@@ -84,7 +87,7 @@ impl PsnLecturerPushTask {
                 }
             }
         }
-        info!("PsnLecturerPushTask completed successfully.");
+        info!("{} completed successfully.", self.name());
 
         Ok(())
     }
@@ -92,6 +95,10 @@ impl PsnLecturerPushTask {
 
 // 实现 TaskExecutor trait
 impl TaskExecutor for PsnLecturerPushTask {
+    fn name(&self) -> &str {
+        &self.task_name // 返回任务名称
+    }
+
     fn execute(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         Box::pin(self.execute_internal()) // 在这里调用实际的异步方法
     }

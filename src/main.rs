@@ -63,7 +63,6 @@ async fn main() -> Result<()> {
         &scheduler,
         main_scheduled_composite_task, // Arc<CompositeTask> 会自动转换为 Arc<dyn TaskExecutor>
         app_config.tasks.psn_push.cron_schedule.as_str(),
-        "PsnPushTask",
         vec![], // 作为依赖任务传入
     )
     .await?;
@@ -96,18 +95,17 @@ async fn create_and_schedule_task_job(
     scheduler: &JobScheduler,
     primary_task: Arc<dyn TaskExecutor + Send + Sync + 'static>, // 主任务
     cron_schedule: &str,
-    job_name: &str,
     dependent_tasks: Vec<Arc<dyn TaskExecutor + Send + Sync + 'static>>, // 依赖任务
 ) -> Result<()> {
     let primary_task_clone = Arc::clone(&primary_task);
-    let job_name_clone = job_name.to_string();
+    let job_name = primary_task_clone.name().to_string();
 
     // 克隆依赖任务（如果存在）给 Job 闭包
     let dependent_tasks_clone_for_job = dependent_tasks.clone();
 
     let job = Job::new_async(cron_schedule, move |uuid, mut scheduler| {
         let primary_task_for_future = Arc::clone(&primary_task_clone);
-        let job_name_for_future = job_name_clone.clone();
+        let job_name_for_future = primary_task_for_future.name().to_string();
         // 克隆依赖任务给 inner async block
         let dependent_tasks_for_future = dependent_tasks_clone_for_job.clone();
 

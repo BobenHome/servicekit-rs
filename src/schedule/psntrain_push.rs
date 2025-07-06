@@ -22,6 +22,7 @@ pub struct PsnTrainPushTask {
     pub mss_info_config: MssInfoConfig,
     archiving_mapper: ArchivingMssMapper,
     push_result_parser: PushResultParser,
+    pub task_name: String, // 添加任务名称字段
 }
 
 impl PsnTrainPushTask {
@@ -34,12 +35,14 @@ impl PsnTrainPushTask {
             archiving_mapper: ArchivingMssMapper::new(pool.clone()), // 克隆 pool 给 mapper
             push_result_parser: PushResultParser::new(pool.clone()),
             pool, // PsntrainPushTask 自身也需要持有 pool，用于 execute 方法中的查询
+            task_name: "PsnTrainPushTask".to_string(), // 设置默认任务名称
         }
     }
 
     pub async fn execute_internal(&self) -> Result<()> {
         info!(
-            "Running task via tokio-cron-scheduler at: {}",
+            "Running {} via tokio-cron-scheduler at: {}",
+            self.name(),
             Local::now().format("%Y-%m-%d %H:%M:%S")
         );
 
@@ -89,13 +92,17 @@ impl PsnTrainPushTask {
                 }
             }
         }
-        info!("PsnTrainPushTask completed successfully.");
+        info!("{} completed successfully.", self.name());
         Ok(()) // 如果一切正常，返回 Ok(())
     }
 }
 
 // 实现 TaskExecutor trait
 impl TaskExecutor for PsnTrainPushTask {
+    fn name(&self) -> &str {
+        &self.task_name // 返回任务名称
+    }
+
     fn execute(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         Box::pin(self.execute_internal()) // 在这里调用实际的异步方法
     }

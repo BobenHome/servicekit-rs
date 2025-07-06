@@ -5,6 +5,8 @@ use std::pin::Pin;
 // 它们必须是 Send + Sync + 'static (线程安全，可在线程间移动，且生命周期静态)
 // 并且提供一个返回 Result<()> 的异步执行方法
 pub trait TaskExecutor: Send + Sync + 'static {
+    // 获取任务名称
+    fn name(&self) -> &str;
     fn execute(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>>;
 }
 

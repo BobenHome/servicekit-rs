@@ -19,6 +19,10 @@ impl CompositeTask {
 }
 
 impl TaskExecutor for CompositeTask {
+    fn name(&self) -> &str {
+        &self.task_name
+    }
+
     fn execute(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>> {
         let tasks_clone = self.tasks.clone();
         let task_name_clone = self.task_name.clone();
@@ -26,8 +30,13 @@ impl TaskExecutor for CompositeTask {
         Box::pin(async move {
             info!("********定时任务 '{}' 开始。", task_name_clone);
             for (i, task) in tasks_clone.iter().enumerate() {
-                let current_task_name =
-                    format!("子任务 #{} ({}的第{}个任务)", i + 1, task_name_clone, i + 1);
+                let current_task_name = format!(
+                    "子任务 {} #{} ({}的第{}个任务)",
+                    task.name(),
+                    i + 1,
+                    task_name_clone,
+                    i + 1
+                );
                 info!("  开始执行 {}", current_task_name); // 缩进表示子任务
                 if let Err(e) = task.execute().await {
                     error!("  执行 {} 异常: {:?}", current_task_name, e);
