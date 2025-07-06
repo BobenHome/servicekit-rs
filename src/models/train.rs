@@ -2,6 +2,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow; // 从数据库读取
 
+// 班级数据结构体
 #[derive(Debug, FromRow, Serialize, Deserialize, Clone)]
 pub struct ClassData {
     pub _id: String,
@@ -54,7 +55,7 @@ pub struct ClassData {
     pub org_class: Option<String>,
 }
 
-// 示例：讲师数据结构体
+// 讲师数据结构体
 #[derive(Debug, FromRow, Serialize, Deserialize, Clone, Default)]
 #[serde(default)] // 自动处理缺失字段的默认值
 pub struct LecturerData {
@@ -68,59 +69,141 @@ pub struct LecturerData {
     pub training_id: String,
     /// hr传输数据人员编码
     #[serde(rename = "userId")]
-    pub user_id: String,
+    pub user_id: Option<String>,
     /// 真实姓名
-    pub user_name: String,
+    pub user_name: Option<String>,
     /// 讲师分类
-    pub lecturer_type: String,
+    pub lecturer_type: Option<String>,
     /// 课程id
-    pub course_id: String,
+    pub course_id: Option<String>,
     /// 课程名称
-    pub course_name: String,
+    pub course_name: Option<String>,
     /// 课程时长
     pub course_time: Option<Decimal>,
     /// 授课质量评估分
-    pub course_assess: String,
+    pub course_assess: Option<String>,
     /// 开始时间
-    pub start_date: String,
+    pub start_date: Option<String>,
     /// 结束时间
-    pub end_date: String,
+    pub end_date: Option<String>,
     /// 员工类别
     #[serde(rename = "jobCategory")]
-    pub job_category: String,
+    pub job_category: Option<String>,
     /// 课程状态 (默认值: "已开课")
     pub course_status: String,
 }
 
-// 实现 operation 的业务逻辑方法
-impl LecturerData {
-    pub fn get_operation(&self) -> &str {
-        if self.operation.is_empty() {
-            "add"
-        } else if self.operation.eq_ignore_ascii_case("update") {
-            "add"
-        } else {
-            &self.operation
-        }
-    }
+// 人员清单数据结构体
+#[derive(Debug, FromRow, Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
+pub struct TrainingData {
+    pub _id: String,
+    /// 业务主键
+    pub id: String,
+    /// 培训班id
+    #[serde(rename = "trainingId")]
+    pub training_id: String,
+    /// 学员mss的id
+    #[serde(rename = "userId")]
+    pub user_id: Option<String>,
+    /// 学员班内角色
+    pub is_sponsor: String,
+    /// 结业状态
+    #[serde(rename = "psnTrainingStatus")]
+    pub psn_training_status: String,
+    /// 员工类别
+    #[serde(rename = "jobCategory")]
+    pub job_category: Option<String>,
+    /// 数据状态
+    pub operation: String,
+    /// 备注
+    pub remark: Option<String>,
 }
 
-// 示例：培训数据结构体
-#[derive(Debug, FromRow, Serialize, Deserialize, Clone)]
-pub struct PsnTrainingData {
-    pub training_id: i32,
-    pub course_name: String,
-    pub duration_hours: i32,
-    // ... 培训相关的字段
-}
-
-// 示例：归档数据结构体
-#[derive(Debug, FromRow, Serialize, Deserialize, Clone)]
-pub struct PsnArchiveData {
-    pub archive_id: i32,
-    pub file_name: String,
-    pub file_size: i32,
-    // ... 归档相关的字段
+// 人员归档数据结构体
+#[derive(Debug, FromRow, Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
+pub struct ArchiveData {
+    /// 业务主键
+    pub _id: String,
+    /// 业务主键
+    pub id: String,
+    /// 数据状态
+    pub operation: String,
+    /// MSS组织唯一编码
+    pub user_org_id: Option<String>,
+    /// MSS组织类型
+    pub user_org_type: Option<String>,
+    /// hr传输数据人员编码
+    #[serde(rename = "userId")]
+    pub user_id: Option<String>,
+    /// 培训班名称
+    pub training_name: String,
+    /// 培训班id
+    #[serde(rename = "trainingId")]
+    pub training_id: String,
+    /// 培训开始日期
+    pub training_start_date: String,
+    /// 培训结束日期
+    pub training_end_date: String,
+    /// 培训类别
+    pub training_category: String,
+    /// 培训方式
+    pub train_mode: String,
+    /// 学习层评估成绩
+    pub study_assess_score: Option<String>,
+    /// 行为层评估成绩
+    pub action_assess_score: Option<String>,
+    /// 主办单位部门MSS组织唯一编码
+    pub sponsor_dept: Option<String>,
+    /// 主办单位部门MSS组织类型
+    pub sponsor_dept_type: Option<String>,
+    /// 主办单位公司MSS组织唯一编码
+    pub sponsor_org_id: Option<String>,
+    /// 主办单位公司MSS组织类型
+    pub sponsor_org_type: Option<String>,
+    /// 培训学时
+    pub training_time: Option<String>,
+    /// 培训地点（境内/外）0:境内 1:境外
+    pub training_place_type: String,
+    /// 备注
+    pub remark: Option<String>,
+    /// 证书编号
+    #[serde(rename = "certificateId")]
+    pub certificate_id: Option<String>,
+    /// 证书等级
+    pub certificate_level: Option<String>,
+    /// 证书名称
+    pub certificate_name: Option<String>,
+    /// 有效期
+    pub grant_date: Option<String>,
+    /// 发证单位名称
+    pub dept: Option<String>,
+    /// 发证单位组织编码
+    #[serde(rename = "deptCode")]
+    pub dept_code: Option<String>,
+    /// 发证单位组织类型
+    #[serde(rename = "dept_Type")]
+    pub dept_type: Option<String>,
+    /// 培训目的
+    pub train_purpose: Option<String>,
+    /// 培训内容
+    pub train_content: Option<String>,
+    /// 承办单位名称
+    #[serde(rename = "undertakeAgentName")]
+    pub undertake_agent_name: Option<String>,
+    /// 空
+    #[serde(rename = "assistAgentName")]
+    pub assist_agent_name: Option<String>,
+    /// 获证日期
+    #[serde(rename = "getCertificateTime")]
+    pub get_certificate_time: Option<String>,
+    /// 员工类别
+    #[serde(rename = "jobCategory")]
+    pub job_category: Option<String>,
+    /// 是否完成培训班（培训班状态已完毕后，数据有效）
+    #[serde(rename = "psnArchiveStatus")]
+    pub psn_archive_status: Option<String>,
 }
 
 // 定义一个枚举来封装所有可能的数据类型
@@ -129,8 +212,8 @@ pub struct PsnArchiveData {
 pub enum DynamicPsnData {
     Class(ClassData),
     Lecturer(LecturerData),
-    PsnTraining(PsnTrainingData),
-    PsnArchive(PsnArchiveData),
+    Training(TrainingData),
+    Archive(ArchiveData),
 }
 
 impl DynamicPsnData {
@@ -139,8 +222,8 @@ impl DynamicPsnData {
         match self {
             DynamicPsnData::Class(_) => "classData",
             DynamicPsnData::Lecturer(_) => "lecturerData",
-            DynamicPsnData::PsnTraining(_) => "psnTrainingData",
-            DynamicPsnData::PsnArchive(_) => "psnArchiveData",
+            DynamicPsnData::Training(_) => "trainingData",
+            DynamicPsnData::Archive(_) => "archiveData",
         }
     }
 }
