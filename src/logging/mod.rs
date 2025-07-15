@@ -11,7 +11,7 @@ use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::{self, filter::EnvFilter, fmt, prelude::*, util::SubscriberInitExt};
 
 // 自定义本地时间格式，保持不变
-struct LocalTimer;
+pub struct LocalTimer;
 
 impl FormatTime for LocalTimer {
     fn format_time(&self, w: &mut Writer<'_>) -> std::fmt::Result {
