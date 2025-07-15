@@ -4,13 +4,14 @@ use serde::Deserialize;
 pub struct AppConfig {
     pub database_url: String,
     pub web_server_port: u16,
-    pub tasks: TasksConfig, // <--- 新增：包含所有任务的配置
+    pub tasks: TasksConfig, // <--- 包含所有任务的配置
     pub mss_info_config: MssInfoConfig,
+    pub telecom_config: TelecomConfig, // <--- 电信相关配置
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct TasksConfig {
-    pub psn_push: PsnPushTaskConfig, // <--- 示例：针对 PsnPushTaskConfig 的配置
+    pub psn_push: PsnPushTaskConfig, // PsnPushTaskConfig 的配置
                                      // pub another_task: AnotherTaskConfig, // <--- 如果有其他任务，可以在这里添加
 }
 
@@ -34,4 +35,13 @@ impl AppConfig {
 
         builder.build()?.try_deserialize()
     }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct TelecomConfig {
+    pub gateway_url: String,
+    pub source_app_id: i32,
+    pub target_app_id: i32,
+    pub mode: i32,
+    pub is_sync: bool,
 }

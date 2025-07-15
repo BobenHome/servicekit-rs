@@ -14,3 +14,11 @@ cron_schedule = "0 */1 * * * *" # 每分钟执行一次，根据你的需求调�
 app_id = "c17eb77644576d28251383c9fc25124d"
 app_key = "bf1685e2184903789d0be9a0f2c8b91f"
 app_url = "http://10.141.134.30:12500/serviceAgent/rest/hrapi/HrTrainInfo/pushTrainingInfo" # 示例
+
+# 电信相关配置
+[telecom_config]
+gateway_url = "http://gateway.easyfun.com.cn/service-gateway"
+source_app_id = 40026
+target_app_id = 40029
+mode = 0
+is_sync = true
