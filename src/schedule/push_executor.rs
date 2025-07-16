@@ -9,6 +9,7 @@ use tracing::{error, info};
 use crate::schedule::BasePsnPushTask;
 use crate::utils::mss_client::psn_dos_push;
 use crate::DynamicPsnData;
+use serde_json::json;
 
 pub trait PsnDataWrapper: Send + Sync + 'static {
     // 修正：在 DataType 的 trait bound 中添加 Unpin
@@ -68,6 +69,20 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
                     psn_data_enum.get_key_name(),
                     base_task.task_name
                 );
+                // 成功后调用小助手接口，写入归档成功的班级
+                if let DynamicPsnData::Class(class_data) = psn_data_enum {
+                    let payload =
+                        vec![json!({&class_data.training_id: &class_data.training_status})];
+                    let _ = base_task
+                        .gateway_client
+                        .invoke_gateway_service("bj.bjglinfo.gettrainstatusbyid", payload)
+                        .await;
+                } else {
+                    info!(
+                        "Skipping gateway service invocation for data of type '{}'. Only 'Class' data is processed by gateway.",
+                        psn_data_enum.get_key_name()
+                    );
+                }
             }
         }
     }

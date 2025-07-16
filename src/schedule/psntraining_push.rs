@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use anyhow::Result;
 use sqlx::{Execute, MySql, MySqlPool, QueryBuilder};
@@ -7,6 +8,7 @@ use sqlx::{Execute, MySql, MySqlPool, QueryBuilder};
 use crate::models::train::TrainingData;
 use crate::schedule::push_executor::{execute_push_task_logic, PsnDataWrapper};
 use crate::schedule::BasePsnPushTask;
+use crate::utils::GatewayClient;
 use crate::{DynamicPsnData, MssInfoConfig, TaskExecutor};
 
 pub struct PsnTrainingPushTask {
@@ -31,9 +33,14 @@ impl PsnDataWrapper for PsnTrainingPushTask {
 }
 
 impl PsnTrainingPushTask {
-    pub fn new(pool: MySqlPool, config: MssInfoConfig) -> Self {
+    pub fn new(pool: MySqlPool, config: MssInfoConfig, gateway_client: Arc<GatewayClient>) -> Self {
         PsnTrainingPushTask {
-            base: BasePsnPushTask::new(pool, config, "PsnTrainingPushTask".to_string()),
+            base: BasePsnPushTask::new(
+                pool,
+                config,
+                "PsnTrainingPushTask".to_string(),
+                gateway_client,
+            ),
         }
     }
 }

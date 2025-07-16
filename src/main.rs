@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::Local;
+use servicekit::utils::GatewayClient;
 use tracing::{error, info};
 //servicekit是crate 名称（在 Cargo.toml 中定义），代表了库。db::pool, schedule::PsntrainPushTask, WebServer 这些都是从 lib.rs 中 pub use 或 pub mod 导出的项。如果 lib.rs 不存在或者没有正确地导出这些模块，main.rs 将无法直接通过 servicekit:: 路径来访问它们
 use servicekit::config::AppConfig;
@@ -39,28 +40,33 @@ async fn main() -> Result<()> {
     info!("Scheduler initialized.");
 
     // 5. 创建 PsnTrainPushTask 实例
-    // 使用从配置中读取的第三方配置
+    // 使用从配置中读取配置
+    let gateway_client = Arc::new(GatewayClient::new(app_config.telecom_config));
     let push_train_task = Arc::new(PsnTrainPushTask::new(
         pool.clone(),
         app_config.mss_info_config.clone(),
+        Arc::clone(&gateway_client),
     ));
 
     // 6. 创建 PsnLecturerPushTask 实例
     let push_lecturer_task = Arc::new(PsnLecturerPushTask::new(
         pool.clone(),
         app_config.mss_info_config.clone(),
+        Arc::clone(&gateway_client),
     ));
 
     // 7. 创建 PsnTrainingPushTask 实例
     let push_training_task = Arc::new(PsnTrainingPushTask::new(
         pool.clone(),
         app_config.mss_info_config.clone(),
+        Arc::clone(&gateway_client),
     ));
 
     // 8. 创建 PsnArchivePushTask 实例
     let push_archive_task = Arc::new(PsnArchivePushTask::new(
         pool.clone(),
         app_config.mss_info_config.clone(),
+        Arc::clone(&gateway_client),
     ));
 
     // --- 将需要串行执行的任务打包进 Vec ---

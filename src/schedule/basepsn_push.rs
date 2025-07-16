@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use crate::config::MssInfoConfig;
 use crate::mappers::archiving_mss_mapper::ArchivingMssMapper;
 use crate::parsers::push_result_parser::PushResultParser;
+use crate::utils::GatewayClient;
 use reqwest::Client;
 use sqlx::MySqlPool;
 
@@ -12,10 +15,16 @@ pub struct BasePsnPushTask {
     pub archiving_mapper: ArchivingMssMapper,
     pub push_result_parser: PushResultParser,
     pub task_name: String, // 每个具体任务的名称
+    pub gateway_client: Arc<GatewayClient>,
 }
 
 impl BasePsnPushTask {
-    pub fn new(pool: MySqlPool, config: MssInfoConfig, task_name: String) -> Self {
+    pub fn new(
+        pool: MySqlPool,
+        config: MssInfoConfig,
+        task_name: String,
+        gateway_client: Arc<GatewayClient>,
+    ) -> Self {
         // MySqlPool 是 Arc 包装的，所以可以安全克隆
         let pool_clone_for_mapper = pool.clone();
         let pool_clone_for_parser = pool.clone();
@@ -27,6 +36,7 @@ impl BasePsnPushTask {
             push_result_parser: PushResultParser::new(pool_clone_for_parser),
             pool, // 自身也需要持有 pool
             task_name,
+            gateway_client,
         }
     }
 }
