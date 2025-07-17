@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::config::MssInfoConfig;
 use crate::schedule::push_executor::{execute_push_task_logic, PsnDataWrapper};
 use crate::schedule::BasePsnPushTask;
-use crate::utils::GatewayClient;
-use crate::{ClassData, DynamicPsnData, TaskExecutor};
+use crate::utils::{ClickHouseClient, GatewayClient};
+use crate::{ClassData, DynamicPsnData, PsnDataKind, TaskExecutor};
 use anyhow::Result;
 use sqlx::{Execute, MySql, MySqlPool, QueryBuilder};
 
@@ -30,26 +30,27 @@ impl PsnDataWrapper for PsnTrainPushTask {
         query_builder.push(" LIMIT 1 ");
         query_builder
     }
+
+    fn get_psn_data_kind_for_wrapper() -> PsnDataKind {
+        PsnDataKind::Class
+    }
 }
 
 impl PsnTrainPushTask {
-    pub fn new(pool: MySqlPool, config: MssInfoConfig, gateway_client: Arc<GatewayClient>) -> Self {
+    pub fn new(
+        pool: MySqlPool,
+        config: MssInfoConfig,
+        gateway_client: Arc<GatewayClient>,
+        clickhouse_client: Arc<ClickHouseClient>,
+    ) -> Self {
         PsnTrainPushTask {
-            base: BasePsnPushTask::new(
-                pool,
-                config,
-                "PsnTrainPushTask".to_string(),
-                gateway_client,
-            ),
+            base: BasePsnPushTask::new(pool, config, gateway_client, clickhouse_client),
         }
     }
 }
 
 // 实现 TaskExecutor trait
 impl TaskExecutor for PsnTrainPushTask {
-    fn name(&self) -> &str {
-        self.base.task_name.as_str()
-    }
     fn execute(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         Box::pin(execute_push_task_logic::<PsnTrainPushTask>(&self.base))
     }

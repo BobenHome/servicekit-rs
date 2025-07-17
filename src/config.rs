@@ -6,7 +6,8 @@ pub struct AppConfig {
     pub web_server_port: u16,
     pub tasks: TasksConfig, // <--- 包含所有任务的配置
     pub mss_info_config: MssInfoConfig,
-    pub telecom_config: TelecomConfig, // <--- 电信相关配置
+    pub telecom_config: TelecomConfig,       // <--- 电信相关配置
+    pub clickhouse_config: ClickhouseConfig, // <--- ClickHouse 配置
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -44,4 +45,13 @@ pub struct TelecomConfig {
     pub target_app_id: i32,
     pub mode: i32,
     pub is_sync: bool,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ClickhouseConfig {
+    pub hosts: Vec<String>,
+    pub ports: Vec<u16>,
+    pub user: String,
+    pub password: String,
+    pub database: String,
 }

@@ -226,4 +226,34 @@ impl DynamicPsnData {
             DynamicPsnData::Archive(_) => "archiveData",
         }
     }
+
+    pub fn get_data_id(&self) -> &str {
+        match self {
+            DynamicPsnData::Class(data) => &data.id,
+            DynamicPsnData::Lecturer(data) => &data.id,
+            DynamicPsnData::Training(data) => &data.id,
+            DynamicPsnData::Archive(data) => &data.id,
+        }
+    }
+}
+
+// 新增：表示 DynamicPsnData 的种类，不包含实际数据
+#[derive(Debug, Clone, Copy, PartialEq, Eq)] // 需要 Copy trait 方便传递
+pub enum PsnDataKind {
+    Class,
+    Lecturer,
+    Training,
+    Archive,
+}
+
+impl PsnDataKind {
+    // 获取任务的友好名称，用于日志打印
+    pub fn to_task_display_name(&self) -> &'static str {
+        match self {
+            PsnDataKind::Class => "PsnClassPushTask",
+            PsnDataKind::Lecturer => "PsnLecturerPushTask",
+            PsnDataKind::Training => "PsnTrainingPushTask",
+            PsnDataKind::Archive => "PsnArchivePushTask",
+        }
+    }
 }

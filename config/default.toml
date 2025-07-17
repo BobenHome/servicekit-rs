@@ -22,3 +22,11 @@ source_app_id = 40026
 target_app_id = 40029
 mode = 0
 is_sync = true
+
+# ClickHouse Configuration
+[clickhouse_config]
+hosts = ["172.25.1.33", "172.25.1.176", "172.25.1.84"]
+ports = [9000, 9001]
+user = "dba"
+password = "dba_dream"
+database = "DXXY_LOCAL"

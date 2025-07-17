@@ -7,8 +7,8 @@ use sqlx::{Execute, MySql, MySqlPool, QueryBuilder};
 
 use crate::schedule::push_executor::{execute_push_task_logic, PsnDataWrapper};
 use crate::schedule::BasePsnPushTask;
-use crate::utils::GatewayClient;
-use crate::{LecturerData, MssInfoConfig, TaskExecutor};
+use crate::utils::{ClickHouseClient, GatewayClient};
+use crate::{LecturerData, MssInfoConfig, PsnDataKind, TaskExecutor};
 
 pub struct PsnLecturerPushTask {
     base: BasePsnPushTask, // <-- 嵌入 BasePsnPushTask
@@ -27,26 +27,26 @@ impl PsnDataWrapper for PsnLecturerPushTask {
         query_builder.push(" LIMIT 1 ");
         query_builder
     }
+    fn get_psn_data_kind_for_wrapper() -> PsnDataKind {
+        PsnDataKind::Lecturer
+    }
 }
 
 impl PsnLecturerPushTask {
-    pub fn new(pool: MySqlPool, config: MssInfoConfig, gateway_client: Arc<GatewayClient>) -> Self {
+    pub fn new(
+        pool: MySqlPool,
+        config: MssInfoConfig,
+        gateway_client: Arc<GatewayClient>,
+        clickhouse_client: Arc<ClickHouseClient>,
+    ) -> Self {
         PsnLecturerPushTask {
-            base: BasePsnPushTask::new(
-                pool,
-                config,
-                "PsnLecturerPushTask".to_string(),
-                gateway_client,
-            ),
+            base: BasePsnPushTask::new(pool, config, gateway_client, clickhouse_client),
         }
     }
 }
 
 // 实现 TaskExecutor trait
 impl TaskExecutor for PsnLecturerPushTask {
-    fn name(&self) -> &str {
-        self.base.task_name.as_str()
-    }
     fn execute(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         Box::pin(execute_push_task_logic::<PsnLecturerPushTask>(&self.base))
     }
