@@ -1,12 +1,11 @@
 // src/schedule/push_executor.rs
 use anyhow::{Context, Result};
 use chrono::{Duration, Local};
-use sqlx::{Database, FromRow, MySql, QueryBuilder}; // 导入 Database trait
+use sqlx::{Database, Execute, FromRow, MySql, MySqlPool, QueryBuilder};
 use std::fmt::Debug;
 use std::marker::Unpin;
 use tracing::{error, info};
 
-use crate::db::updaters;
 use crate::schedule::BasePsnPushTask;
 use crate::utils::mss_client::psn_dos_push;
 use crate::{DynamicPsnData, PsnDataKind};
@@ -150,7 +149,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
         }
     }
 
-    // Process successful IDs
+    // --- ClickHouse Updates ---
     if psn_data_kind != PsnDataKind::Training {
         // 在数据处理前，直接从 PsnDataWrapper 获取 ClickHouse 的表和ID字段
         let clickhouse_table = get_clickhouse_table_name(psn_data_kind);
@@ -159,13 +158,13 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
             "Processing data for ClickHouse table: '{}' using ID column: '{}' for task: {}",
             clickhouse_table, clickhouse_id_column, task_display_name
         );
-        const BATCH_SIZE: usize = 500;
+        const BATCH_SIZE: usize = 1000;
 
         if !success_ids.is_empty() {
             for chunk in success_ids.chunks(BATCH_SIZE) {
                 let ids_for_query = chunk
                     .iter()
-                    .map(|id| format!("'{}'", id)) // Prepare IDs for SQL IN clause
+                    .map(|id| format!("'{}'", id))
                     .collect::<Vec<String>>()
                     .join(",");
 
@@ -175,14 +174,10 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
                     clickhouse_table, status, clickhouse_id_column, ids_for_query
                 );
                 info!("Attempting to update success status in ClickHouse.");
-                match base_task
+                base_task
                     .clickhouse_client
                     .execute_on_all_nodes(&query_sql)
-                    .await
-                {
-                    Ok(_) => info!("ClickHouse update for success batch successful."),
-                    Err(e) => error!("Failed to update ClickHouse for success batch: {:?}", e),
-                }
+                    .await;
             }
         }
         // Process error IDs
@@ -208,14 +203,10 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
                     clickhouse_table, status, clickhouse_id_column, ids_for_query
                 );
                 info!("Attempting to update error status in ClickHouse.");
-                match base_task
+                base_task
                     .clickhouse_client
                     .execute_on_all_nodes(&query_sql)
-                    .await
-                {
-                    Ok(_) => info!("ClickHouse update for error batch successful."),
-                    Err(e) => error!("Failed to update ClickHouse for error batch: {:?}", e),
-                }
+                    .await;
             }
         }
     } else {
@@ -226,7 +217,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
     if psn_data_kind != PsnDataKind::Training {
         let mysql_table = get_mysql_table_name(psn_data_kind);
         let mysql_id_column = get_mysql_id_column(psn_data_kind);
-        const BATCH_SIZE: usize = 500;
+        const BATCH_SIZE: usize = 1000;
         // 只有 PsnDataKind::Lecturer 类型需要更新 trainNotifyMssMessage 字段
         let update_message_field = psn_data_kind == PsnDataKind::Lecturer; // <--- 根据类型设置此标志
         info!(
@@ -241,7 +232,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
                 success_ids.iter().map(|id| (id.clone(), None)).collect();
 
             for chunk in success_items.chunks(BATCH_SIZE) {
-                match updaters::update_notify_mss_mysql(
+                update_notify_mss_mysql(
                     &base_task.pool,
                     mysql_table,
                     mysql_id_column,
@@ -249,18 +240,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
                     chunk,
                     update_message_field,
                 )
-                .await
-                {
-                    // <--- 传递 update_message_field
-                    Ok(rows_affected) => info!(
-                        "MySQL success update for PsnDataKind::{:?} completed. Rows affected: {}",
-                        psn_data_kind, rows_affected
-                    ),
-                    Err(e) => error!(
-                        "Failed to update MySQL for PsnDataKind::{:?} (success): {:?}",
-                        psn_data_kind, e
-                    ),
-                }
+                .await;
             }
         }
 
@@ -268,7 +248,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
         if !failed_ids.is_empty() {
             // failed_ids 已经是 Vec<(String, Option<String>)>，可以直接使用
             for chunk in failed_ids.chunks(BATCH_SIZE) {
-                match updaters::update_notify_mss_mysql(
+                update_notify_mss_mysql(
                     &base_task.pool,
                     mysql_table,
                     mysql_id_column,
@@ -276,18 +256,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
                     chunk,
                     update_message_field,
                 )
-                .await
-                {
-                    // <--- 传递 update_message_field
-                    Ok(rows_affected) => info!(
-                        "MySQL error update for PsnDataKind::{:?} completed. Rows affected: {}",
-                        psn_data_kind, rows_affected
-                    ),
-                    Err(e) => error!(
-                        "Failed to update MySQL for PsnDataKind::{:?} (error): {:?}",
-                        psn_data_kind, e
-                    ),
-                }
+                .await;
             }
         }
     } else {
@@ -297,4 +266,89 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
     info!("{} completed successfully.", task_display_name);
 
     Ok(())
+}
+
+// 更新 MySQL 表的 `trainNotifyMss` 字段和可选的 `trainNotifyMssMessage` 字段。
+///
+/// 根据传入的 `table_name` 和 `id_column` 来构建更新语句。
+/// `items` 参数是 `(ID, Option<Message>)` 的元组列表。
+/// `update_message_field` 参数指示是否应更新 `trainNotifyMssMessage` 字段。
+pub async fn update_notify_mss_mysql(
+    pool: &MySqlPool,
+    table_name: &str,
+    id_column: &str,
+    status: &str,
+    items: &[(String, Option<String>)],
+    update_message_field: bool,
+) {
+    if items.is_empty() {
+        return;
+    }
+
+    // 构建 UPDATE ... SET trainNotifyMss = CASE <id_column> WHEN <id_value> THEN <status> ... END
+    let mut query_builder: QueryBuilder<MySql> = QueryBuilder::new(format!(
+        "UPDATE {} SET trainNotifyMss = CASE {} ",
+        table_name, id_column
+    ));
+
+    // 为每个 item 构建 WHEN ... THEN ... 部分
+    for (id, _) in items {
+        query_builder.push(" WHEN "); // 推送 SQL 关键字
+        query_builder.push_bind(id.clone()); // 绑定 ID 值，sqlx 会为其生成一个 ?
+        query_builder.push(" THEN "); // 推送 SQL 关键字
+        query_builder.push_bind(status); // 绑定状态值，sqlx 会为其生成一个 ?
+    }
+    query_builder.push(" END"); // 结束 CASE 语句
+
+    // 根据 `update_message_field` 参数来决定是否包含 `trainNotifyMssMessage` 的更新逻辑
+    if update_message_field {
+        query_builder.push(format!(", trainNotifyMssMessage = CASE {} ", id_column));
+        for (id, msg_opt) in items {
+            query_builder.push(" WHEN "); // 推送 SQL 关键字
+            query_builder.push_bind(id.clone()); // 绑定 ID 值
+            query_builder.push(" THEN "); // 推送 SQL 关键字
+
+            if status == "2" {
+                // 失败状态，绑定消息
+                query_builder.push_bind(msg_opt.clone()); // 绑定消息值
+            } else {
+                // 成功状态，明确设置为 NULL
+                query_builder.push("NULL ");
+            }
+        }
+        query_builder.push(" END"); // 结束 CASE 语句
+    }
+
+    // 构建 WHERE id IN (...)
+    query_builder.push(format!(" WHERE {} IN (", id_column));
+    let mut separated = query_builder.separated(", ");
+    for (id, _) in items {
+        separated.push_bind(id);
+    }
+    separated.push_unseparated(")");
+
+    let query = query_builder.build();
+
+    info!(
+        "Executing MySQL update query for table '{}', ID column '{}'. Status: {}, Items count: {}, Update message field: {}",
+        table_name, id_column, status, items.len(), update_message_field
+    );
+    // 打印构建的 SQL 语句和绑定参数，便于调试验证
+    info!("Built MySQL update query: {}", query.sql());
+
+    match query.execute(pool).await {
+        Ok(result) => {
+            info!(
+                "MySQL update for table '{}' completed. Rows affected: {}",
+                table_name,
+                result.rows_affected()
+            );
+        }
+        Err(e) => {
+            error!(
+                "Failed to update MySQL table '{}' (status: {}, items: {:?}): {:?}",
+                table_name, status, items, e
+            );
+        }
+    }
 }

@@ -33,7 +33,7 @@ impl ClickHouseClient {
     }
     /// 在所有配置的 ClickHouse 节点上执行 SQL 查询。
     /// 这里的实现会尝试在每个客户端上执行查询，如果某个客户端失败，会记录错误但继续尝试其他客户端。
-    pub async fn execute_on_all_nodes(&self, sql: &str) -> Result<()> {
+    pub async fn execute_on_all_nodes(&self, sql: &str) {
         let mut all_success = true;
         for (host, client_arc) in &self.clients {
             info!("Executing query on ClickHouse node: {}", host);
@@ -49,12 +49,10 @@ impl ClickHouseClient {
             }
         }
         if all_success {
-            Ok(())
+            info!("All ClickHouse nodes executed the query successfully.");
         } else {
             // 如果至少有一个节点执行失败，则返回错误
-            Err(anyhow::anyhow!(
-                "Some ClickHouse nodes failed to execute the query. Check logs for details."
-            ))
+            error!("Some ClickHouse nodes failed to execute the query.");
         }
     }
 }
