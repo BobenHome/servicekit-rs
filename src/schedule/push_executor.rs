@@ -6,6 +6,7 @@ use std::fmt::Debug;
 use std::marker::Unpin;
 use tracing::{error, info};
 
+use crate::db::updaters;
 use crate::schedule::BasePsnPushTask;
 use crate::utils::mss_client::psn_dos_push;
 use crate::{DynamicPsnData, PsnDataKind};
@@ -27,10 +28,7 @@ fn get_clickhouse_table_name(kind: PsnDataKind) -> &'static str {
         PsnDataKind::Class => "DXXY_LOCAL.TRAIN_SOURCE_DATA_ZTK_ALL",
         PsnDataKind::Lecturer => "DXXY_LOCAL.TRAIN_COURSE_DATA_ZTK_ALL",
         PsnDataKind::Archive => "DXXY_LOCAL.TRAIN_USER_DATA_ZTK_ALL",
-        PsnDataKind::Training => {
-            error!("Attempted to get ClickHouse table name for DynamicPsnData::Training. If this type requires ClickHouse update, define its table here.");
-            "UNKNOWN_TABLE_FOR_TRAINING"
-        }
+        PsnDataKind::Training => "UNKNOWN_TABLE_FOR_TRAINING",
     }
 }
 
@@ -40,9 +38,30 @@ fn get_clickhouse_id_column(kind: PsnDataKind) -> &'static str {
         PsnDataKind::Class => "T_TRAINID",
         PsnDataKind::Lecturer => "id",
         PsnDataKind::Archive => "id",
+        PsnDataKind::Training => "UNKNOWN_ID_COLUMN_FOR_TRAINING",
+    }
+}
+
+// 新增辅助函数：根据 PsnDataKind 类型获取 MySQL 表名
+fn get_mysql_table_name(kind: PsnDataKind) -> &'static str {
+    match kind {
+        PsnDataKind::Class => "NU_trainSourceData_ztk",
+        PsnDataKind::Lecturer => "NU_TRAINCOURSESOURCEDATA_ZTK",
+        PsnDataKind::Archive => "nu_trainusersourcedata_ztk",
         PsnDataKind::Training => {
-            error!("Attempted to get ClickHouse ID column for DynamicPsnData::Training. If this type requires ClickHouse update, define its ID column here.");
-            "UNKNOWN_ID_COLUMN_FOR_TRAINING"
+            "TABLE_NOT_APPLICABLE_FOR_TRAINING_MYSQL" // 占位符
+        }
+    }
+}
+
+// 新增辅助函数：根据 PsnDataKind 类型获取 MySQL ID 字段名
+fn get_mysql_id_column(kind: PsnDataKind) -> &'static str {
+    match kind {
+        PsnDataKind::Class => "TRAINID",
+        PsnDataKind::Lecturer => "id",
+        PsnDataKind::Archive => "id",
+        PsnDataKind::Training => {
+            "ID_COLUMN_NOT_APPLICABLE_FOR_TRAINING_MYSQL" // 占位符
         }
     }
 }
@@ -201,6 +220,78 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
         }
     } else {
         info!("Skipping ClickHouse updates for PsnDataKind::Training.");
+    }
+
+    // --- MySQL Updates ---
+    if psn_data_kind != PsnDataKind::Training {
+        let mysql_table = get_mysql_table_name(psn_data_kind);
+        let mysql_id_column = get_mysql_id_column(psn_data_kind);
+        const BATCH_SIZE: usize = 500;
+        // 只有 PsnDataKind::Lecturer 类型需要更新 trainNotifyMssMessage 字段
+        let update_message_field = psn_data_kind == PsnDataKind::Lecturer; // <--- 根据类型设置此标志
+        info!(
+                "Attempting MySQL updates for PsnDataKind::{:?} (Table: '{}', ID Column: '{}', Update message field: {}).",
+                psn_data_kind, mysql_table, mysql_id_column, update_message_field
+            );
+
+        // 处理成功 ID 的 MySQL 更新
+        if !success_ids.is_empty() {
+            // 将成功 ID 转换为 (String, Option<String>) 格式，消息为 None
+            let success_items: Vec<(String, Option<String>)> =
+                success_ids.iter().map(|id| (id.clone(), None)).collect();
+
+            for chunk in success_items.chunks(BATCH_SIZE) {
+                match updaters::update_notify_mss_mysql(
+                    &base_task.pool,
+                    mysql_table,
+                    mysql_id_column,
+                    "1",
+                    chunk,
+                    update_message_field,
+                )
+                .await
+                {
+                    // <--- 传递 update_message_field
+                    Ok(rows_affected) => info!(
+                        "MySQL success update for PsnDataKind::{:?} completed. Rows affected: {}",
+                        psn_data_kind, rows_affected
+                    ),
+                    Err(e) => error!(
+                        "Failed to update MySQL for PsnDataKind::{:?} (success): {:?}",
+                        psn_data_kind, e
+                    ),
+                }
+            }
+        }
+
+        // 处理失败 ID 的 MySQL 更新
+        if !failed_ids.is_empty() {
+            // failed_ids 已经是 Vec<(String, Option<String>)>，可以直接使用
+            for chunk in failed_ids.chunks(BATCH_SIZE) {
+                match updaters::update_notify_mss_mysql(
+                    &base_task.pool,
+                    mysql_table,
+                    mysql_id_column,
+                    "2",
+                    chunk,
+                    update_message_field,
+                )
+                .await
+                {
+                    // <--- 传递 update_message_field
+                    Ok(rows_affected) => info!(
+                        "MySQL error update for PsnDataKind::{:?} completed. Rows affected: {}",
+                        psn_data_kind, rows_affected
+                    ),
+                    Err(e) => error!(
+                        "Failed to update MySQL for PsnDataKind::{:?} (error): {:?}",
+                        psn_data_kind, e
+                    ),
+                }
+            }
+        }
+    } else {
+        info!("Skipping MySQL updates for PsnDataKind::Training.");
     }
 
     info!("{} completed successfully.", task_display_name);
