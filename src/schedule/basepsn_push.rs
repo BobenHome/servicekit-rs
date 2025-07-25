@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::config::MssInfoConfig;
 use crate::mappers::archiving_mss_mapper::ArchivingMssMapper;
@@ -29,8 +30,16 @@ impl BasePsnPushTask {
         let pool_clone_for_mapper = pool.clone();
         let pool_clone_for_parser = pool.clone();
 
+        // 自定义 HTTP 客户端，设置超时
+        let http_client = Client::builder()
+            .connect_timeout(Duration::from_secs(5)) // TCP连接最多等5秒
+            .read_timeout(Duration::from_secs(5)) // 读取响应最多等5秒
+            .timeout(Duration::from_secs(10)) // 整个请求最多10秒
+            .build()
+            .expect("Failed to build reqwest client");
+
         BasePsnPushTask {
-            http_client: Client::new(),
+            http_client,
             mss_info_config: config,
             archiving_mapper: ArchivingMssMapper::new(pool_clone_for_mapper),
             push_result_parser: PushResultParser::new(pool_clone_for_parser),

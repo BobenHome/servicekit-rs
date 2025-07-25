@@ -113,12 +113,6 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
             )
             .await
             {
-                error!(
-                    "Failed to send data of type '{}' to third party: {:?}. Task: {}",
-                    psn_data_enum.get_key_name(),
-                    e,
-                    task_display_name
-                );
                 if matches!(psn_data_enum, DynamicPsnData::Lecturer(_)) {
                     failed_ids.push((current_id, Some(e.to_string())));
                 } else {
