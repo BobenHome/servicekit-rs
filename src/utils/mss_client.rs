@@ -162,10 +162,6 @@ pub async fn psn_dos_push(
         Err(e) => {
             // 请求失败，记录失败信息
             let error_message = format!("ERROR: {:?}", e); // 捕获并格式化错误
-            error!(
-                "Attempted to send data to third party failed: {}",
-                error_message
-            );
 
             let record_reply_error = RecordMssReply {
                 id: Uuid::new_v4().to_string().replace("-", ""),

@@ -42,7 +42,7 @@ config = "0.15"
 mockito = "1.7"    # 用于模拟 HTTP 请求
 tokio-test = "0.4" # 用于在测试中更方便地运行异步代码
 
-clickhouse = { version = "0.11", features = ["wa-37420"] }
+clickhouse-rs = { git = "https://github.com/suharev7/clickhouse-rs.git", branch = "async-await" }
 
 [[bin]]
 name = "servicekit"
