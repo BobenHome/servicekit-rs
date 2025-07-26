@@ -17,6 +17,8 @@ pub struct BasePsnPushTask {
     pub push_result_parser: PushResultParser,
     pub gateway_client: Arc<GatewayClient>,
     pub clickhouse_client: Arc<ClickHouseClient>, // 添加 ClickHouse 客户端
+    pub hit_date: Option<String>,                 // 存储可选的 hit_date
+    pub train_ids: Option<Vec<String>>,           // 存储可选的 train_ids
 }
 
 impl BasePsnPushTask {
@@ -25,6 +27,8 @@ impl BasePsnPushTask {
         config: MssInfoConfig,
         gateway_client: Arc<GatewayClient>,
         clickhouse_client: Arc<ClickHouseClient>,
+        hit_date: Option<String>,
+        train_ids: Option<Vec<String>>,
     ) -> Self {
         // MySqlPool 是 Arc 包装的，所以可以安全克隆
         let pool_clone_for_mapper = pool.clone();
@@ -46,6 +50,8 @@ impl BasePsnPushTask {
             pool,
             gateway_client,
             clickhouse_client,
+            hit_date,
+            train_ids,
         }
     }
 }

@@ -22,10 +22,10 @@ impl GatewayClient {
     /// 创建一个新的 GatewayClient 实例。
     ///
     /// 参数 `source`, `target`, `mode`, `is_sync` 通常来自应用程序的配置。
-    pub fn new(telecom_config: TelecomConfig) -> Self {
+    pub fn new(telecom_config: &TelecomConfig) -> Self {
         GatewayClient {
             client: Client::new(),
-            config: telecom_config,
+            config: telecom_config.clone(),
         }
     }
 

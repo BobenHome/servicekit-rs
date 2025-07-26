@@ -37,7 +37,7 @@ async fn test_invoke_gateway_service_real_success() -> Result<()> {
     setup_logging_for_tests();
     // 2. 加载应用程序配置
     let app_config = AppConfig::new().context("Failed to load application configuration")?;
-    let client = GatewayClient::new(app_config.telecom_config.clone());
+    let client = GatewayClient::new(&app_config.telecom_config);
     // 3. 准备测试用的 payload 数据
     let test_payload = vec![json!({"111111": 1})];
     // 4. 调用您要测试的方法。它现在会向真实的网关发送请求

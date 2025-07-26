@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use sqlx::{Execute, MySql, MySqlPool, QueryBuilder};
 
-use crate::schedule::push_executor::{execute_push_task_logic, PsnDataWrapper};
+use crate::schedule::push_executor::{execute_push_task_logic, PsnDataWrapper, QueryType};
 use crate::schedule::BasePsnPushTask;
 use crate::utils::{ClickHouseClient, GatewayClient};
 use crate::{LecturerData, MssInfoConfig, PsnDataKind, TaskExecutor};
@@ -19,12 +19,24 @@ impl PsnDataWrapper for PsnLecturerPushTask {
     fn wrap_data(data: Self::DataType) -> crate::DynamicPsnData {
         crate::DynamicPsnData::Lecturer(data)
     }
-    fn get_final_query_builder(hit_date: &str) -> QueryBuilder<'static, MySql> {
+    fn get_query_builder(query_type: QueryType) -> QueryBuilder<'static, MySql> {
         let raw_sql_query = sqlx::query_file!("queries/lecturers.sql");
         let mut query_builder = QueryBuilder::<MySql>::new(raw_sql_query.sql());
-        query_builder.push(" AND T.hitdate = ");
-        query_builder.push_bind(hit_date.to_string());
-        query_builder.push(" LIMIT 1 ");
+
+        match query_type {
+            QueryType::ByDate(hit_date) => {
+                query_builder.push(" AND T.hitdate = ");
+                query_builder.push_bind(hit_date);
+            }
+            QueryType::ByIds(ids) => {
+                query_builder.push(" AND T.TRAINID IN (");
+                let mut separated = query_builder.separated(", ");
+                for id in ids {
+                    separated.push_bind(id);
+                }
+                separated.push_unseparated(")");
+            }
+        }
         query_builder
     }
     fn get_psn_data_kind_for_wrapper() -> PsnDataKind {
@@ -38,9 +50,18 @@ impl PsnLecturerPushTask {
         config: MssInfoConfig,
         gateway_client: Arc<GatewayClient>,
         clickhouse_client: Arc<ClickHouseClient>,
+        hit_date: Option<String>,
+        train_ids: Option<Vec<String>>,
     ) -> Self {
         PsnLecturerPushTask {
-            base: BasePsnPushTask::new(pool, config, gateway_client, clickhouse_client),
+            base: BasePsnPushTask::new(
+                pool,
+                config,
+                gateway_client,
+                clickhouse_client,
+                hit_date,
+                train_ids,
+            ),
         }
     }
 }

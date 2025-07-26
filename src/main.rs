@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
 
     // 5. 创建 PsnTrainPushTask 实例
     // 使用从配置中读取配置
-    let gateway_client = Arc::new(GatewayClient::new(app_config.telecom_config));
+    let gateway_client = Arc::new(GatewayClient::new(&app_config.telecom_config));
 
     // --- Initialize ClickHouseClient ---
     let clickhouse_client = Arc::new(
@@ -55,6 +55,8 @@ async fn main() -> Result<()> {
         app_config.mss_info_config.clone(),
         Arc::clone(&gateway_client),
         Arc::clone(&clickhouse_client),
+        None,
+        None,
     ));
 
     // 6. 创建 PsnLecturerPushTask 实例
@@ -63,6 +65,8 @@ async fn main() -> Result<()> {
         app_config.mss_info_config.clone(),
         Arc::clone(&gateway_client),
         Arc::clone(&clickhouse_client),
+        None,
+        None,
     ));
 
     // 7. 创建 PsnTrainingPushTask 实例
@@ -71,6 +75,8 @@ async fn main() -> Result<()> {
         app_config.mss_info_config.clone(),
         Arc::clone(&gateway_client),
         Arc::clone(&clickhouse_client),
+        None,
+        None,
     ));
 
     // 8. 创建 PsnArchivePushTask 实例
@@ -79,6 +85,8 @@ async fn main() -> Result<()> {
         app_config.mss_info_config.clone(),
         Arc::clone(&gateway_client),
         Arc::clone(&clickhouse_client),
+        None,
+        None,
     ));
 
     // --- 将需要串行执行的任务打包进 Vec ---
@@ -91,7 +99,7 @@ async fn main() -> Result<()> {
     // --- 创建 CompositeTask 实例 ---
     let main_scheduled_composite_task = Arc::new(CompositeTask::new(
         composite_tasks,
-        "培训班数据归档到MSS".to_string(),
+        "培训班数据归档到MSS定时任务".to_string(),
     ));
 
     // 9. 使用辅助函数创建并添加 CompositeTask 的 Cron Job
@@ -116,7 +124,7 @@ async fn main() -> Result<()> {
     });
 
     // 11.启动 Web 服务器
-    let server = WebServer::new(app_config.web_server_port, pool);
+    let server = WebServer::new(pool, app_config);
     server.start().await.context("Failed to start web server")?;
 
     info!("Application shut down cleanly.");

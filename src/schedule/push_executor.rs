@@ -11,11 +11,19 @@ use crate::utils::mss_client::psn_dos_push;
 use crate::{DynamicPsnData, PsnDataKind};
 use serde_json::json;
 
+pub const BATCH_SIZE: usize = 1000;
+
+// 定义查询类型枚举
+pub enum QueryType {
+    ByDate(String),
+    ByIds(Vec<String>),
+}
+
 pub trait PsnDataWrapper: Send + Sync + 'static {
     // 修正：在 DataType 的 trait bound 中添加 Unpin
     type DataType: for<'r> FromRow<'r, <MySql as Database>::Row> + Debug + Send + Sync + Unpin;
     fn wrap_data(data: Self::DataType) -> DynamicPsnData;
-    fn get_final_query_builder(hit_date: &str) -> QueryBuilder<'static, MySql>;
+    fn get_query_builder(query_type: QueryType) -> QueryBuilder<'static, MySql>;
 
     // 新增：获取此 Wrapper 处理的 DynamicPsnData 的种类
     fn get_psn_data_kind_for_wrapper() -> PsnDataKind;
@@ -75,14 +83,27 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
         Local::now().format("%Y-%m-%d %H:%M:%S")
     );
 
-    let today = Local::now().date_naive();
-    let yesterday = today - Duration::days(1);
-    let hit_date = yesterday.format("%Y-%m-%d").to_string();
+    let query_type = if let Some(date_str) = base_task.hit_date.clone() {
+        // <--- 克隆 String 以便 QueryType 拥有
+        info!("Processing data for specific date: {}", date_str);
+        QueryType::ByDate(date_str) // <--- 传递拥有所有权的 String
+    } else if let Some(ids) = base_task.train_ids.clone() {
+        // <--- 克隆 Vec<String> 以便 QueryType 拥有
+        info!("Processing data for specific IDs: {:?}", ids);
+        QueryType::ByIds(ids) // <--- 传递拥有所有权的 Vec<String>
+    } else {
+        // 如果没有提供 train_ids 和 hit_date，则回退到计算“昨天”的日期
+        let today = Local::now().date_naive();
+        let yesterday = today - Duration::days(1);
+        let hit_date_calculated = yesterday.format("%Y-%m-%d").to_string(); // <--- 创建拥有所有权的 String
+        info!(
+            "Processing data for calculated hit_date: {}",
+            hit_date_calculated
+        );
+        QueryType::ByDate(hit_date_calculated) // <--- 传递拥有所有权的 String
+    };
 
-    // <-- 从 PsnDataWrapper 获取预构建的 QueryBuilder
-    let mut query_builder = W::get_final_query_builder(&hit_date);
-
-    let datas = query_builder
+    let datas = W::get_query_builder(query_type)
         .build_query_as::<W::DataType>()
         .fetch_all(&base_task.pool)
         .await
@@ -96,49 +117,48 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
     let mut failed_ids: Vec<(String, Option<String>)> = Vec::new();
 
     if datas.is_empty() {
-        info!("No {} found for hitdate: {}", task_display_name, hit_date);
-    } else {
-        for data in datas {
-            info!("Found {}: {:?}", task_display_name, data);
-            let psn_data_enum = W::wrap_data(data);
+        info!("No data found for task: {}", task_display_name);
+        return Ok(());
+    }
+    for data in datas {
+        info!("Found {}: {:?}", task_display_name, data);
+        let psn_data_enum = W::wrap_data(data);
 
-            let current_id = psn_data_enum.get_data_id().to_string();
+        let current_id = psn_data_enum.get_data_id().to_string();
 
-            if let Err(e) = psn_dos_push(
-                &base_task.http_client,
-                &base_task.mss_info_config,
-                &base_task.archiving_mapper,
-                &base_task.push_result_parser,
-                &psn_data_enum,
-            )
-            .await
-            {
-                if matches!(psn_data_enum, DynamicPsnData::Lecturer(_)) {
-                    failed_ids.push((current_id, Some(e.to_string())));
-                } else {
-                    failed_ids.push((current_id, None));
-                }
+        if let Err(e) = psn_dos_push(
+            &base_task.http_client,
+            &base_task.mss_info_config,
+            &base_task.archiving_mapper,
+            &base_task.push_result_parser,
+            &psn_data_enum,
+        )
+        .await
+        {
+            if matches!(psn_data_enum, DynamicPsnData::Lecturer(_)) {
+                failed_ids.push((current_id, Some(e.to_string())));
+            } else {
+                failed_ids.push((current_id, None));
+            }
+        } else {
+            info!(
+                "Successfully sent data of type '{}' to third party. Task: {}",
+                psn_data_enum.get_key_name(),
+                task_display_name
+            );
+            success_ids.push(current_id);
+            // 成功后调用小助手接口，写入归档成功的班级
+            if let DynamicPsnData::Class(class_data) = psn_data_enum {
+                let payload = vec![json!({&class_data.training_id: &class_data.training_status})];
+                let _ = base_task
+                    .gateway_client
+                    .invoke_gateway_service("bj.bjglinfo.gettrainstatusbyid", payload)
+                    .await;
             } else {
                 info!(
-                    "Successfully sent data of type '{}' to third party. Task: {}",
-                    psn_data_enum.get_key_name(),
-                    task_display_name
+                    "Skipping gateway service invocation for data of type '{}'. Only 'Class' data is processed by gateway.",
+                    psn_data_enum.get_key_name()
                 );
-                success_ids.push(current_id);
-                // 成功后调用小助手接口，写入归档成功的班级
-                if let DynamicPsnData::Class(class_data) = psn_data_enum {
-                    let payload =
-                        vec![json!({&class_data.training_id: &class_data.training_status})];
-                    let _ = base_task
-                        .gateway_client
-                        .invoke_gateway_service("bj.bjglinfo.gettrainstatusbyid", payload)
-                        .await;
-                } else {
-                    info!(
-                        "Skipping gateway service invocation for data of type '{}'. Only 'Class' data is processed by gateway.",
-                        psn_data_enum.get_key_name()
-                    );
-                }
             }
         }
     }
@@ -152,7 +172,6 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
             "Processing data for ClickHouse table: '{}' using ID column: '{}' for task: {}",
             clickhouse_table, clickhouse_id_column, task_display_name
         );
-        const BATCH_SIZE: usize = 1000;
 
         if !success_ids.is_empty() {
             for chunk in success_ids.chunks(BATCH_SIZE) {
@@ -211,7 +230,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
     if psn_data_kind != PsnDataKind::Training {
         let mysql_table = get_mysql_table_name(psn_data_kind);
         let mysql_id_column = get_mysql_id_column(psn_data_kind);
-        const BATCH_SIZE: usize = 1000;
+
         // 只有 PsnDataKind::Lecturer 类型需要更新 trainNotifyMssMessage 字段
         let update_message_field = psn_data_kind == PsnDataKind::Lecturer; // <--- 根据类型设置此标志
         info!(

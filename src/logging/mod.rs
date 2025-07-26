@@ -206,7 +206,7 @@ pub fn init_logging() -> Result<()> {
         .with_line_number(true)
         .with_file(true)
         .with_level(true)
-        .with_filter(EnvFilter::new("info"));
+        .with_filter(EnvFilter::new("debug")); // 文件日志通常使用 debug 级别
 
     // 3. 创建一个 fmt 层用于控制台输出
     let stdout_layer = fmt::layer()
@@ -217,7 +217,7 @@ pub fn init_logging() -> Result<()> {
         .with_line_number(true)
         .with_file(true)
         .with_level(true)
-        .with_filter(EnvFilter::new("info"));
+        .with_filter(EnvFilter::new("debug")); // 控制台日志通常使用 debug 级别
 
     // 4. 将两个层组合起来并初始化全局订阅者
     tracing_subscriber::registry()
