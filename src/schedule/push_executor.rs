@@ -78,7 +78,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
     let psn_data_kind = W::get_psn_data_kind_for_wrapper(); // 获取当前任务处理的数据类型种类
     let task_display_name = psn_data_kind.to_task_display_name(); // 获取任务名称
     info!(
-        "Running {} via tokio-cron-scheduler at: {}",
+        "Running {} via execute_push_task_logic at: {}",
         task_display_name,
         Local::now().format("%Y-%m-%d %H:%M:%S")
     );

@@ -54,7 +54,7 @@ impl PsnTrainPushTask {
         config: MssInfoConfig,
         gateway_client: Arc<GatewayClient>,
         clickhouse_client: Arc<ClickHouseClient>,
-        hit_date: Option<String>, // <-- 添加 hit_date 参数
+        hit_date: Option<String>,
         train_ids: Option<Vec<String>>,
     ) -> Self {
         PsnTrainPushTask {
