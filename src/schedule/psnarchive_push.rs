@@ -52,7 +52,7 @@ impl PsnDataWrapper for PsnArchivePushTask {
 impl PsnArchivePushTask {
     pub fn new(
         pool: MySqlPool,
-        config: MssInfoConfig,
+        config: Arc<MssInfoConfig>,
         gateway_client: Arc<GatewayClient>,
         clickhouse_client: Arc<ClickHouseClient>,
         hit_date: Option<String>,

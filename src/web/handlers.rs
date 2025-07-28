@@ -17,8 +17,8 @@ use tracing::{error, info, warn};
 #[post("/pxb/pushMss")]
 pub async fn push_msss(
     pool: web::Data<MySqlPool>,
-    app_config: web::Data<AppConfig>, // 注入 AppConfig
-    body: web::Json<PushDataParams>,  // <--- 接收 JSON 请求体
+    app_config: web::Data<Arc<AppConfig>>, // 注入 AppConfig
+    body: web::Json<PushDataParams>,       // <--- 接收 JSON 请求体
 ) -> Result<HttpResponse> {
     // 验证请求参数
     if let Err(e) = body.validate() {
@@ -27,15 +27,17 @@ pub async fn push_msss(
 
     // 克隆必要的配置和连接池，以便在异步任务中使用
     let pool_clone = pool.get_ref().clone();
-    let app_config_clone = app_config.get_ref().clone();
+    let app_config_arc = app_config.into_inner();
 
     tokio::spawn(async move {
         info!("********pxb mss pushByDate begin********");
         // 使用从配置中读取配置
-        let gateway_client = Arc::new(GatewayClient::new(&app_config_clone.telecom_config));
+        let gateway_client = Arc::new(GatewayClient::new(Arc::clone(
+            &app_config_arc.telecom_config,
+        )));
         // 正确处理 ClickHouseClient 的初始化 Result
         let clickhouse_client = Arc::new(
-            match ClickHouseClient::new(&app_config_clone.clickhouse_config) {
+            match ClickHouseClient::new(Arc::clone(&app_config_arc.clickhouse_config)) {
                 Ok(client) => client,
                 Err(e) => {
                     error!("Failed to initialize ClickHouseClient: {:?}", e);
@@ -53,7 +55,7 @@ pub async fn push_msss(
             // 情况 1: 提供了 train_ids
             process_push_tasks(
                 pool_clone.clone(),
-                app_config_clone.clone(),
+                Arc::clone(&app_config_arc),
                 Arc::clone(&gateway_client),
                 Arc::clone(&clickhouse_client),
                 None,
@@ -80,7 +82,7 @@ pub async fn push_msss(
                 info!("=================={}=======================", current_date);
                 process_push_tasks(
                     pool_clone.clone(),
-                    app_config_clone.clone(),
+                    Arc::clone(&app_config_arc),
                     Arc::clone(&gateway_client),
                     Arc::clone(&clickhouse_client),
                     Some(current_date.clone()),
@@ -105,7 +107,7 @@ pub async fn push_msss(
 // --- 辅助函数：封装了创建和执行推送任务的逻辑 ---
 async fn process_push_tasks(
     pool: MySqlPool,
-    app_config: AppConfig,
+    app_config: Arc<AppConfig>,
     gateway_client: Arc<GatewayClient>,
     clickhouse_client: Arc<ClickHouseClient>,
     hit_date: Option<String>,
@@ -122,7 +124,7 @@ async fn process_push_tasks(
 
     let push_train_task = Arc::new(PsnTrainPushTask::new(
         pool.clone(),
-        app_config.mss_info_config.clone(),
+        Arc::clone(&app_config.mss_info_config),
         Arc::clone(&gateway_client),
         Arc::clone(&clickhouse_client),
         hit_date.clone(),
@@ -130,7 +132,7 @@ async fn process_push_tasks(
     ));
     let push_lecturer_task = Arc::new(PsnLecturerPushTask::new(
         pool.clone(),
-        app_config.mss_info_config.clone(),
+        Arc::clone(&app_config.mss_info_config),
         Arc::clone(&gateway_client),
         Arc::clone(&clickhouse_client),
         hit_date.clone(),
@@ -138,7 +140,7 @@ async fn process_push_tasks(
     ));
     let push_training_task = Arc::new(PsnTrainingPushTask::new(
         pool.clone(),
-        app_config.mss_info_config.clone(),
+        Arc::clone(&app_config.mss_info_config),
         Arc::clone(&gateway_client),
         Arc::clone(&clickhouse_client),
         hit_date.clone(),
@@ -146,7 +148,7 @@ async fn process_push_tasks(
     ));
     let push_archive_task = Arc::new(PsnArchivePushTask::new(
         pool.clone(),
-        app_config.mss_info_config.clone(),
+        Arc::clone(&app_config.mss_info_config),
         Arc::clone(&gateway_client),
         Arc::clone(&clickhouse_client),
         hit_date.clone(),

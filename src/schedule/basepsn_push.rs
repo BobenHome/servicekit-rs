@@ -12,7 +12,7 @@ use sqlx::MySqlPool;
 pub struct BasePsnPushTask {
     pub pool: MySqlPool,
     pub http_client: Client, // 更改为 pub，方便从外部访问，如果需要
-    pub mss_info_config: MssInfoConfig,
+    pub mss_info_config: Arc<MssInfoConfig>,
     pub archiving_mapper: ArchivingMssMapper,
     pub push_result_parser: PushResultParser,
     pub gateway_client: Arc<GatewayClient>,
@@ -24,7 +24,7 @@ pub struct BasePsnPushTask {
 impl BasePsnPushTask {
     pub fn new(
         pool: MySqlPool,
-        config: MssInfoConfig,
+        config: Arc<MssInfoConfig>,
         gateway_client: Arc<GatewayClient>,
         clickhouse_client: Arc<ClickHouseClient>,
         hit_date: Option<String>,

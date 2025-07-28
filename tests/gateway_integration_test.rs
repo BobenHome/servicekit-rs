@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use servicekit::{logging::LocalTimer, utils::gateway_client::GatewayClient, AppConfig};
 
-use std::sync::Once;
+use std::sync::{Arc, Once};
 use tracing::info;
 use tracing_subscriber::{self, fmt::TestWriter, FmtSubscriber}; // 用于确保日志只初始化一次
 
@@ -37,7 +37,8 @@ async fn test_invoke_gateway_service_real_success() -> Result<()> {
     setup_logging_for_tests();
     // 2. 加载应用程序配置
     let app_config = AppConfig::new().context("Failed to load application configuration")?;
-    let client = GatewayClient::new(&app_config.telecom_config);
+    let app_config_arc = Arc::new(app_config);
+    let client = GatewayClient::new(Arc::clone(&app_config_arc.telecom_config));
     // 3. 准备测试用的 payload 数据
     let test_payload = vec![json!({"111111": 1})];
     // 4. 调用您要测试的方法。它现在会向真实的网关发送请求

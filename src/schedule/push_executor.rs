@@ -4,6 +4,7 @@ use chrono::{Duration, Local};
 use sqlx::{Database, Execute, FromRow, MySql, MySqlPool, QueryBuilder};
 use std::fmt::Debug;
 use std::marker::Unpin;
+use std::sync::Arc;
 use tracing::{error, info};
 
 use crate::schedule::BasePsnPushTask;
@@ -128,7 +129,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
 
         if let Err(e) = psn_dos_push(
             &base_task.http_client,
-            &base_task.mss_info_config,
+            Arc::clone(&base_task.mss_info_config),
             &base_task.archiving_mapper,
             &base_task.push_result_parser,
             &psn_data_enum,

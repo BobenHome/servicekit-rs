@@ -12,7 +12,7 @@ pub struct ClickHouseClient {
 }
 
 impl ClickHouseClient {
-    pub fn new(config: &ClickhouseConfig) -> Result<Self> {
+    pub fn new(config: Arc<ClickhouseConfig>) -> Result<Self> {
         let mut clients = Vec::new();
 
         for host in &config.hosts {

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{web::handlers, AppConfig};
 use actix_web::{middleware, web, App, HttpServer};
 use anyhow::{Context, Result}; // 导入 anyhow::Result 和 Context trait
@@ -7,11 +9,11 @@ use tracing::info;
 pub struct WebServer {
     port: u16,
     pool: MySqlPool,
-    app_config: AppConfig,
+    app_config: Arc<AppConfig>,
 }
 
 impl WebServer {
-    pub fn new(pool: MySqlPool, app_config: AppConfig) -> Self {
+    pub fn new(pool: MySqlPool, app_config: Arc<AppConfig>) -> Self {
         WebServer {
             port: app_config.web_server_port,
             pool,
@@ -23,12 +25,13 @@ impl WebServer {
         info!("Starting web server on port {}", self.port); // 使用 info! 宏
 
         let pool = self.pool.clone();
-        let app_config = self.app_config.clone();
+        // let app_config = self.app_config.clone();
+        let app_config_for_app = Arc::clone(&self.app_config); 
 
         HttpServer::new(move || {
             App::new()
                 .app_data(web::Data::new(pool.clone())) // 在每个 worker 线程中克隆一次 pool
-                .app_data(web::Data::new(app_config.clone()))
+                .app_data(web::Data::new(app_config_for_app.clone()))
                 .wrap(middleware::Logger::default()) // 启用请求日志
                 .wrap(middleware::Compress::default()) // 启用响应压缩
                 .service(

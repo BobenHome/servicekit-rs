@@ -30,6 +30,7 @@ sqlx = { version = "0.8.6", features = [
     "rust_decimal",
 ] }
 cron = "0.15.0"
+chrono-tz = "0.10.4"
 tokio-cron-scheduler = "0.14.0"
 uuid = { version = "1.17.0", features = ["v4"] }
 anyhow = "1.0"

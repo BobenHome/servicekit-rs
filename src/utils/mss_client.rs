@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::{anyhow, Context, Result};
 use chrono::Local;
 use reqwest::{Client, StatusCode};
@@ -12,7 +14,7 @@ use crate::{ArchivingMssMapper, DynamicPsnData, MssInfoConfig, PushResultParser,
 // 将其设为 pub，以便其他模块可以调用
 pub async fn psn_dos_push(
     http_client: &Client,                  // 引用类型，避免所有权转移
-    mss_info_config: &MssInfoConfig,       // 引用类型
+    mss_info_config: Arc<MssInfoConfig>,       // 引用类型
     archiving_mapper: &ArchivingMssMapper, // 引用类型
     push_result_parser: &PushResultParser, // 引用类型
     psn_data: &DynamicPsnData,             // 引用类型

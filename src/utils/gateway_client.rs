@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::{anyhow, Context, Result};
 use chrono::Utc; // 用于获取当前毫秒时间戳
 use reqwest::Client;
@@ -15,17 +17,14 @@ use serde_json::Value; // 用于 payload
 /// 网关客户端，封装了与电信服务网关的 HTTP 通信。
 pub struct GatewayClient {
     pub client: Client,
-    pub config: TelecomConfig,
+    pub config: Arc<TelecomConfig>,
 }
 
 impl GatewayClient {
-    /// 创建一个新的 GatewayClient 实例。
-    ///
-    /// 参数 `source`, `target`, `mode`, `is_sync` 通常来自应用程序的配置。
-    pub fn new(telecom_config: &TelecomConfig) -> Self {
+    pub fn new(telecom_config: Arc<TelecomConfig>) -> Self {
         GatewayClient {
             client: Client::new(),
-            config: telecom_config.clone(),
+            config: telecom_config,
         }
     }
 
