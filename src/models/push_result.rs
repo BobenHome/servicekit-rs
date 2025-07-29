@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local};
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MssPushResult {
-    pub id: String,                 // 数据库中存储为 VARCHAR(36)
-    pub push_time: DateTime<Local>, // 使用 DateTime<Local> 存储本地时间
+    pub id: String, // 数据库中存储为 VARCHAR(36)
+    pub push_time: NaiveDateTime,
     pub train_id: Option<String>,
     pub course_id: Option<String>,
     pub user_id: Option<String>,

@@ -15,11 +15,11 @@ impl PushResultParser {
             push_result_service: PushResultService::new(pool),
         }
     }
-    pub async fn parse(&self, data: &str, result: &str) {
+    pub async fn parse(&self, data: &str, result: &str) -> Result<(), String> {
         info!("Parsing push result beginning");
         let mut push_result = MssPushResult {
             id: Uuid::new_v4().to_string(),
-            push_time: Local::now(),
+            push_time: Local::now().naive_local(),
             train_id: None,
             course_id: None,
             user_id: None,
@@ -33,9 +33,10 @@ impl PushResultParser {
         let result_data: serde_json::Value = match serde_json::from_str(result) {
             Ok(val) => val,
             Err(e) => {
-                error!("Failed to parse result JSON: {:?}", e);
+                let error_message = format!("Failed to parse result JSON: {:?}", e);
+                error!("{}", error_message);
                 push_result.error_code = Some("PARSE_ERROR".to_string());
-                push_result.error_msg = Some(format!("Failed to parse result JSON: {:?}", e));
+                push_result.error_msg = Some(error_message.clone());
                 if let Err(record_err) = self
                     .push_result_service
                     .record(&push_result, &result_details)
@@ -43,7 +44,7 @@ impl PushResultParser {
                 {
                     error!("Failed to record result parse error: {:?}", record_err);
                 }
-                return;
+                return Err(error_message);
             }
         };
 
@@ -58,8 +59,9 @@ impl PushResultParser {
         let request_data: serde_json::Value = match serde_json::from_str(data) {
             Ok(val) => val,
             Err(e) => {
-                error!("Failed to parse request data JSON: {:?}", e);
-                push_result.error_msg = Some(format!("Failed to parse request data JSON: {:?}", e));
+                let error_message = format!("Failed to parse request data JSON: {:?}", e);
+                error!("{}", error_message);
+                push_result.error_msg = Some(error_message.clone());
                 if let Err(record_err) = self
                     .push_result_service
                     .record(&push_result, &result_details)
@@ -70,7 +72,7 @@ impl PushResultParser {
                         record_err
                     );
                 }
-                return;
+                return Err(error_message);
             }
         };
 
@@ -116,7 +118,11 @@ impl PushResultParser {
             {
                 error!("Failed to record successful push result: {:?}", record_err);
             }
-            return; // 成功后返回，与 Java 行为一致
+            info!(
+                "Parsing push result completed successfully. Result ID: {}",
+                push_result.id
+            );
+            return Ok(());
         }
 
         // --- 处理失败情况 (code != "200") --
@@ -125,11 +131,9 @@ impl PushResultParser {
             // <--- 尝试将其作为字符串获取
             Some(s) => s,
             None => {
-                error!("'data' field in result JSON is not a string or does not exist. Cannot extract error details.");
-                push_result.error_msg = Some(format!(
-                    "Failed to parse error details: 'data' field is not a string or missing. Full result: {}",
-                    result
-                ));
+                let error_message = format!("'data' field in result JSON is not a string or does not exist. Cannot extract error details. Full result: {}", result);
+                error!("{}", error_message);
+                push_result.error_msg = Some(error_message.clone());
                 if let Err(record_err) = self
                     .push_result_service
                     .record(&push_result, &result_details)
@@ -140,7 +144,7 @@ impl PushResultParser {
                         record_err
                     );
                 }
-                return;
+                return Err(error_message);
             }
         };
 
@@ -149,14 +153,12 @@ impl PushResultParser {
             match serde_json::from_str(raw_rs_data_str) {
                 Ok(map) => map,
                 Err(e) => {
-                    error!(
+                    let error_message = format!(
                         "Failed to parse 'data' string as JSON object: {:?}. Original string: {}",
                         e, raw_rs_data_str
                     );
-                    push_result.error_msg = Some(format!(
-                        "Failed to parse 'data' string as JSON object: {:?}. Original string: {}",
-                        e, raw_rs_data_str
-                    ));
+                    error!("{}", error_message);
+                    push_result.error_msg = Some(error_message.clone());
                     if let Err(record_err) = self
                         .push_result_service
                         .record(&push_result, &result_details)
@@ -167,7 +169,7 @@ impl PushResultParser {
                             record_err
                         );
                     }
-                    return;
+                    return Err(error_message);
                 }
             };
 
@@ -233,6 +235,14 @@ impl PushResultParser {
             error!("Failed to record failed push result: {:?}", record_err);
         }
 
-        info!("Parsing push result completed. Result ID: {}", push_result.id);
+        // 推送失败，返回失败
+        let final_error_message = push_result
+            .error_msg
+            .unwrap_or_else(|| format!("Push failed with desc_code: {}", desc_code));
+        info!(
+            "Parsing push result completed with error. Result ID: {}",
+            push_result.id
+        );
+        Err(final_error_message)
     }
 }

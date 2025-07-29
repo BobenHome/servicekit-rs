@@ -14,7 +14,7 @@ use crate::{ArchivingMssMapper, DynamicPsnData, MssInfoConfig, PushResultParser,
 // 将其设为 pub，以便其他模块可以调用
 pub async fn psn_dos_push(
     http_client: &Client,                  // 引用类型，避免所有权转移
-    mss_info_config: Arc<MssInfoConfig>,       // 引用类型
+    mss_info_config: Arc<MssInfoConfig>,   // 引用类型
     archiving_mapper: &ArchivingMssMapper, // 引用类型
     push_result_parser: &PushResultParser, // 引用类型
     psn_data: &DynamicPsnData,             // 引用类型
@@ -156,9 +156,13 @@ pub async fn psn_dos_push(
                 .context("Failed to record SUCCESS MSS reply")?; // 使用 ? 传播数据库写入错误
 
             // 只有成功时才调用 parser.parse
-            push_result_parser
+            let push_result = push_result_parser
                 .parse(&request_json_data, &final_http_body_str)
                 .await;
+            // 根据解析结果判断是否成功
+            if let Err(msg) = push_result {
+                return Err(anyhow::anyhow!(msg));
+            }
             Ok(()) // 主请求和记录都成功
         }
         Err(e) => {
