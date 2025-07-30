@@ -222,8 +222,8 @@ impl DynamicPsnData {
         match self {
             DynamicPsnData::Class(_) => "classData",
             DynamicPsnData::Lecturer(_) => "lecturerData",
-            DynamicPsnData::Training(_) => "trainingData",
-            DynamicPsnData::Archive(_) => "archiveData",
+            DynamicPsnData::Training(_) => "psnTrainingData",
+            DynamicPsnData::Archive(_) => "psnArchiveData",
         }
     }
 

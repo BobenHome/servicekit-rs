@@ -97,8 +97,8 @@ async fn main() -> Result<()> {
     let composite_tasks: Vec<Arc<dyn TaskExecutor + Send + Sync + 'static>> = vec![
         push_train_task,
         push_lecturer_task,
-        push_training_task,
         push_archive_task,
+        push_training_task,
     ];
     // --- 创建 CompositeTask 实例 ---
     let main_scheduled_composite_task = Arc::new(CompositeTask::new(
