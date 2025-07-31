@@ -1,0 +1,104 @@
+{
+  "db_name": "MySQL",
+  "query": "-- name: get_training_sc_list\n-- 获取四川人员培训清单信息\nSELECT a.ID                                               AS _id,\n       a.ID                                               AS id,\n       a.DATASTATE                                        AS operation,\n       a.trainid                                          AS training_id,\n       b.MSS_HRCODE                                       AS user_id,\n       IF(INSTR(a.STUDENTROLE, '5') > 0, 'true', 'false') AS is_sponsor,\n       IF(a.graduationstate = '1', '通过', '未通过')      AS psn_training_status,\n       b.MSS_JOBCATEGORY                                  AS job_category,\n       c.TRAINEXPLAN                                      AS remark\nFROM NU_TRAINUSERSOURCEDATA_SC_HYK a\n         INNER JOIN NU_TRAINSOURCEDATA_SC_HYK c ON a.TRAINID = c.id\n         LEFT JOIN mc_user_ztk b ON a.userid = b.id\n         LEFT JOIN fz_train_traintype tt ON tt.`CODE` = c.TRAINTYPE\nWHERE b.MSS_USERSTATUS = 1\n  AND (b.MSS_JOBTYPE = 1 OR b.MSS_HRJOBTYPE = 1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "_id",
+        "type_info": {
+          "type": "VarString",
+          "flags": "MULTIPLE_KEY",
+          "max_size": 2000
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "id",
+        "type_info": {
+          "type": "VarString",
+          "flags": "MULTIPLE_KEY",
+          "max_size": 2000
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "operation",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 2000
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "training_id",
+        "type_info": {
+          "type": "VarString",
+          "flags": "MULTIPLE_KEY",
+          "max_size": 2000
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "user_id",
+        "type_info": {
+          "type": "VarString",
+          "flags": "MULTIPLE_KEY",
+          "max_size": 1020
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "is_sponsor",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL",
+          "max_size": 20
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "psn_training_status",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL",
+          "max_size": 12
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "job_category",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 1020
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "remark",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "max_size": 4294967295
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "36190502c805ebabda52cd6ae731841dcca84aac9ce3200dafe8486e9fed6131"
+}

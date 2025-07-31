@@ -5,7 +5,8 @@ use tracing::{error, info};
 //servicekit是crate 名称（在 Cargo.toml 中定义），代表了库。db::pool, schedule::PsntrainPushTask, WebServer 这些都是从 lib.rs 中 pub use 或 pub mod 导出的项。如果 lib.rs 不存在或者没有正确地导出这些模块，main.rs 将无法直接通过 servicekit:: 路径来访问它们
 use servicekit::config::AppConfig;
 use servicekit::schedule::{
-    CompositeTask, PsnArchivePushTask, PsnLecturerPushTask, PsnTrainingPushTask,
+    CompositeTask, PsnArchivePushTask, PsnArchiveScPushTask, PsnLecturerPushTask,
+    PsnLecturerScPushTask, PsnTrainScPushTask, PsnTrainingPushTask, PsnTrainingScPushTask,
 };
 use servicekit::{db::pool, schedule::PsnTrainPushTask, WebServer};
 use servicekit::{logging, TaskExecutor};
@@ -93,12 +94,56 @@ async fn main() -> Result<()> {
         None,
     ));
 
+    // 9. 创建 PsnTrainScPushTask 实例
+    let push_train_sc_task = Arc::new(PsnTrainScPushTask::new(
+        pool.clone(),
+        Arc::clone(&app_config_arc.mss_info_config),
+        Arc::clone(&gateway_client),
+        Arc::clone(&clickhouse_client),
+        None,
+        None,
+    ));
+
+    // 10. 创建 PsnLecturerScPushTask 实例
+    let push_lecturer_sc_task = Arc::new(PsnLecturerScPushTask::new(
+        pool.clone(),
+        Arc::clone(&app_config_arc.mss_info_config),
+        Arc::clone(&gateway_client),
+        Arc::clone(&clickhouse_client),
+        None,
+        None,
+    ));
+
+    // 11. 创建 PsnTrainingScPushTask 实例
+    let push_training_sc_task = Arc::new(PsnTrainingScPushTask::new(
+        pool.clone(),
+        Arc::clone(&app_config_arc.mss_info_config),
+        Arc::clone(&gateway_client),
+        Arc::clone(&clickhouse_client),
+        None,
+        None,
+    ));
+
+    // 12. 创建 PsnArchiveScPushTask 实例
+    let push_archive_sc_task = Arc::new(PsnArchiveScPushTask::new(
+        pool.clone(),
+        Arc::clone(&app_config_arc.mss_info_config),
+        Arc::clone(&gateway_client),
+        Arc::clone(&clickhouse_client),
+        None,
+        None,
+    ));
+
     // --- 将需要串行执行的任务打包进 Vec ---
     let composite_tasks: Vec<Arc<dyn TaskExecutor + Send + Sync + 'static>> = vec![
         push_train_task,
         push_lecturer_task,
         push_archive_task,
         push_training_task,
+        push_train_sc_task,
+        push_lecturer_sc_task,
+        push_archive_sc_task,
+        push_training_sc_task,
     ];
     // --- 创建 CompositeTask 实例 ---
     let main_scheduled_composite_task = Arc::new(CompositeTask::new(
@@ -106,7 +151,7 @@ async fn main() -> Result<()> {
         "培训班数据归档到MSS定时任务".to_string(),
     ));
 
-    // 9. 使用辅助函数创建并添加 CompositeTask 的 Cron Job
+    // 13. 使用辅助函数创建并添加 CompositeTask 的 Cron Job
     create_and_schedule_task_job(
         &scheduler,
         main_scheduled_composite_task, // Arc<CompositeTask> 会自动转换为 Arc<dyn TaskExecutor>
@@ -115,7 +160,7 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    // 10. 在后台启动调度器，这样它就不会阻塞 Web 服务器的启动
+    // 14. 在后台启动调度器，这样它就不会阻塞 Web 服务器的启动
     tokio::spawn(async move {
         info!("Attempting to start scheduler in background...");
         // 显式处理 scheduler.start().await 的 Result
@@ -127,13 +172,12 @@ async fn main() -> Result<()> {
         }
     });
 
-    // 11.启动 Web 服务器
+    // 15.启动 Web 服务器
     let server = WebServer::new(pool, Arc::clone(&app_config_arc));
     server.start().await.context("Failed to start web server")?;
 
     info!("Application shut down cleanly.");
 
-    // main 函数的 Result 成功变体
     Ok(())
 }
 

@@ -13,6 +13,8 @@ pub struct PushDataParams {
     pub begin_date: Option<String>,     // 日期范围的开始日期
     pub end_date: Option<String>,       // 日期范围的结束日期
     pub train_ids: Option<Vec<String>>, // 培训 ID 列表
+    #[serde(default)] // This allows the field to be absent in JSON and default to false
+    pub is_sichuan_data: bool, // Using bool, defaults to false if not provided
 }
 
 impl PushDataParams {

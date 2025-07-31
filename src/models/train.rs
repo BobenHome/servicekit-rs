@@ -244,6 +244,10 @@ pub enum PsnDataKind {
     Lecturer,
     Training,
     Archive,
+    ClassSc,
+    LecturerSc,
+    TrainingSc,
+    ArchiveSc,
 }
 
 impl PsnDataKind {
@@ -254,6 +258,10 @@ impl PsnDataKind {
             PsnDataKind::Lecturer => "PsnLecturerPushTask",
             PsnDataKind::Training => "PsnTrainingPushTask",
             PsnDataKind::Archive => "PsnArchivePushTask",
+            PsnDataKind::ClassSc => "PsnClassScPushTask",
+            PsnDataKind::LecturerSc => "PsnLecturerScPushTask",
+            PsnDataKind::TrainingSc => "PsnTrainingScPushTask",
+            PsnDataKind::ArchiveSc => "PsnArchiveScPushTask",
         }
     }
 }

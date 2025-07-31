@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use crate::{
     schedule::{
-        CompositeTask, PsnArchivePushTask, PsnLecturerPushTask, PsnTrainPushTask,
-        PsnTrainingPushTask,
+        CompositeTask, PsnArchivePushTask, PsnArchiveScPushTask, PsnLecturerPushTask,
+        PsnLecturerScPushTask, PsnTrainPushTask, PsnTrainScPushTask, PsnTrainingPushTask,
+        PsnTrainingScPushTask,
     },
     utils::{ClickHouseClient, GatewayClient},
     web::{models::ApiResponse, PushDataParams},
@@ -50,6 +51,7 @@ pub async fn push_msss(
         let begin_date_opt = &body.begin_date;
         let end_date_opt = &body.end_date;
         let train_ids_opt = &body.train_ids;
+        let is_sichuan_data = &body.is_sichuan_data;
 
         if let Some(ids) = train_ids_opt {
             // 情况 1: 提供了 train_ids
@@ -60,6 +62,7 @@ pub async fn push_msss(
                 Arc::clone(&clickhouse_client),
                 None,
                 Some(ids.to_vec()),
+                *is_sichuan_data,
             )
             .await;
         } else if let (Some(begin_date_str), Some(end_date_str)) = (begin_date_opt, end_date_opt) {
@@ -87,6 +90,7 @@ pub async fn push_msss(
                     Arc::clone(&clickhouse_client),
                     Some(current_date.clone()),
                     None,
+                    *is_sichuan_data,
                 )
                 .await;
                 info!(
@@ -112,6 +116,7 @@ async fn process_push_tasks(
     clickhouse_client: Arc<ClickHouseClient>,
     hit_date: Option<String>,
     train_ids: Option<Vec<String>>,
+    is_sichuan_data: bool,
 ) {
     let task_name_suffix = if let Some(_) = &train_ids {
         "根据培训班ID"
@@ -120,49 +125,84 @@ async fn process_push_tasks(
     } else {
         "UNKNOWN"
     };
-    let composite_task_name = format!("培训班数据归档到MSS{}", task_name_suffix);
+    let composite_task_name = if is_sichuan_data {
+        format!("四川省培训班数据归档到MSS{}", task_name_suffix)
+    } else {
+        format!("培训班数据归档到MSS{}", task_name_suffix)
+    };
 
-    let push_train_task = Arc::new(PsnTrainPushTask::new(
-        pool.clone(),
-        Arc::clone(&app_config.mss_info_config),
-        Arc::clone(&gateway_client),
-        Arc::clone(&clickhouse_client),
-        hit_date.clone(),
-        train_ids.clone(),
-    ));
-    let push_lecturer_task = Arc::new(PsnLecturerPushTask::new(
-        pool.clone(),
-        Arc::clone(&app_config.mss_info_config),
-        Arc::clone(&gateway_client),
-        Arc::clone(&clickhouse_client),
-        hit_date.clone(),
-        train_ids.clone(),
-    ));
-    let push_training_task = Arc::new(PsnTrainingPushTask::new(
-        pool.clone(),
-        Arc::clone(&app_config.mss_info_config),
-        Arc::clone(&gateway_client),
-        Arc::clone(&clickhouse_client),
-        hit_date.clone(),
-        train_ids.clone(),
-    ));
-    let push_archive_task = Arc::new(PsnArchivePushTask::new(
-        pool.clone(),
-        Arc::clone(&app_config.mss_info_config),
-        Arc::clone(&gateway_client),
-        Arc::clone(&clickhouse_client),
-        hit_date.clone(),
-        train_ids.clone(),
-    ));
-
-    // 将需要串行执行的任务打包进 Vec
-    let composite_tasks: Vec<Arc<dyn TaskExecutor + Send + Sync + 'static>> = vec![
-        push_train_task,
-        push_lecturer_task,
-        push_training_task,
-        push_archive_task,
-    ];
-
+    let composite_tasks: Vec<Arc<dyn TaskExecutor + Send + Sync + 'static>>;
+    if is_sichuan_data {
+        composite_tasks = vec![
+            Arc::new(PsnTrainScPushTask::new(
+                pool.clone(),
+                Arc::clone(&app_config.mss_info_config),
+                Arc::clone(&gateway_client),
+                Arc::clone(&clickhouse_client),
+                hit_date.clone(),
+                train_ids.clone(),
+            )),
+            Arc::new(PsnLecturerScPushTask::new(
+                pool.clone(),
+                Arc::clone(&app_config.mss_info_config),
+                Arc::clone(&gateway_client),
+                Arc::clone(&clickhouse_client),
+                hit_date.clone(),
+                train_ids.clone(),
+            )),
+            Arc::new(PsnArchiveScPushTask::new(
+                pool.clone(),
+                Arc::clone(&app_config.mss_info_config),
+                Arc::clone(&gateway_client),
+                Arc::clone(&clickhouse_client),
+                hit_date.clone(),
+                train_ids.clone(),
+            )),
+            Arc::new(PsnTrainingScPushTask::new(
+                pool.clone(),
+                Arc::clone(&app_config.mss_info_config),
+                Arc::clone(&gateway_client),
+                Arc::clone(&clickhouse_client),
+                hit_date.clone(),
+                train_ids.clone(),
+            )),
+        ];
+    } else {
+        composite_tasks = vec![
+            Arc::new(PsnTrainPushTask::new(
+                pool.clone(),
+                Arc::clone(&app_config.mss_info_config),
+                Arc::clone(&gateway_client),
+                Arc::clone(&clickhouse_client),
+                hit_date.clone(),
+                train_ids.clone(),
+            )),
+            Arc::new(PsnLecturerPushTask::new(
+                pool.clone(),
+                Arc::clone(&app_config.mss_info_config),
+                Arc::clone(&gateway_client),
+                Arc::clone(&clickhouse_client),
+                hit_date.clone(),
+                train_ids.clone(),
+            )),
+            Arc::new(PsnArchivePushTask::new(
+                pool.clone(),
+                Arc::clone(&app_config.mss_info_config),
+                Arc::clone(&gateway_client),
+                Arc::clone(&clickhouse_client),
+                hit_date.clone(),
+                train_ids.clone(),
+            )),
+            Arc::new(PsnTrainingPushTask::new(
+                pool.clone(),
+                Arc::clone(&app_config.mss_info_config),
+                Arc::clone(&gateway_client),
+                Arc::clone(&clickhouse_client),
+                hit_date.clone(),
+                train_ids.clone(),
+            )),
+        ];
+    }
     // 创建 CompositeTask 实例
     let composite_task = Arc::new(CompositeTask::new(composite_tasks, composite_task_name));
 

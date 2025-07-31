@@ -1,4 +1,3 @@
-// src/schedule/push_executor.rs
 use anyhow::{Context, Result};
 use chrono::{Duration, Local};
 use sqlx::{Database, Execute, FromRow, MySql, MySqlPool, QueryBuilder};
@@ -37,6 +36,7 @@ fn get_clickhouse_table_name(kind: PsnDataKind) -> &'static str {
         PsnDataKind::Lecturer => "DXXY_LOCAL.TRAIN_COURSE_DATA_ZTK_ALL",
         PsnDataKind::Archive => "DXXY_LOCAL.TRAIN_USER_DATA_ZTK_ALL",
         PsnDataKind::Training => "UNKNOWN_TABLE_FOR_TRAINING",
+        _ => "UNKNOWN_TABLE",
     }
 }
 
@@ -47,16 +47,17 @@ fn get_clickhouse_id_column(kind: PsnDataKind) -> &'static str {
         PsnDataKind::Lecturer => "id",
         PsnDataKind::Archive => "id",
         PsnDataKind::Training => "UNKNOWN_ID_COLUMN_FOR_TRAINING",
+        _ => "UNKNOWN_ID_COLUMN",
     }
 }
 
 // 新增辅助函数：根据 PsnDataKind 类型获取 MySQL 表名
 fn get_mysql_table_name(kind: PsnDataKind) -> &'static str {
     match kind {
-        PsnDataKind::Class => "NU_trainSourceData_ztk",
-        PsnDataKind::Lecturer => "NU_TRAINCOURSESOURCEDATA_ZTK",
-        PsnDataKind::Archive => "nu_trainusersourcedata_ztk",
-        PsnDataKind::Training => {
+        PsnDataKind::Class | PsnDataKind::ClassSc => "NU_trainSourceData_ztk",
+        PsnDataKind::Lecturer | PsnDataKind::LecturerSc => "NU_TRAINCOURSESOURCEDATA_ZTK",
+        PsnDataKind::Archive | PsnDataKind::ArchiveSc => "nu_trainusersourcedata_ztk",
+        PsnDataKind::Training | PsnDataKind::TrainingSc => {
             "TABLE_NOT_APPLICABLE_FOR_TRAINING_MYSQL" // 占位符
         }
     }
@@ -65,10 +66,10 @@ fn get_mysql_table_name(kind: PsnDataKind) -> &'static str {
 // 新增辅助函数：根据 PsnDataKind 类型获取 MySQL ID 字段名
 fn get_mysql_id_column(kind: PsnDataKind) -> &'static str {
     match kind {
-        PsnDataKind::Class => "TRAINID",
-        PsnDataKind::Lecturer => "id",
-        PsnDataKind::Archive => "id",
-        PsnDataKind::Training => {
+        PsnDataKind::Class | PsnDataKind::ClassSc => "TRAINID",
+        PsnDataKind::Lecturer | PsnDataKind::LecturerSc => "id",
+        PsnDataKind::Archive | PsnDataKind::ArchiveSc => "id",
+        PsnDataKind::Training | PsnDataKind::TrainingSc => {
             "ID_COLUMN_NOT_APPLICABLE_FOR_TRAINING_MYSQL" // 占位符
         }
     }
@@ -165,7 +166,20 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
     }
 
     // --- ClickHouse Updates ---
-    if psn_data_kind != PsnDataKind::Training {
+    if matches!(
+        psn_data_kind,
+        PsnDataKind::Training
+            | PsnDataKind::ClassSc
+            | PsnDataKind::LecturerSc
+            | PsnDataKind::TrainingSc
+            | PsnDataKind::ArchiveSc
+    ) {
+        // 不更新 ClickHouse
+        info!(
+            "Skipping ClickHouse updates for PsnDataKind: {:?}.",
+            psn_data_kind
+        );
+    } else {
         // 在数据处理前，直接从 PsnDataWrapper 获取 ClickHouse 的表和ID字段
         let clickhouse_table = get_clickhouse_table_name(psn_data_kind);
         let clickhouse_id_column = get_clickhouse_id_column(psn_data_kind);
@@ -223,12 +237,19 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
                     .await;
             }
         }
-    } else {
-        info!("Skipping ClickHouse updates for PsnDataKind::Training.");
     }
 
     // --- MySQL Updates ---
-    if psn_data_kind != PsnDataKind::Training {
+    if matches!(
+        psn_data_kind,
+        PsnDataKind::Training | PsnDataKind::TrainingSc
+    ) {
+        // 不更新 MySQL
+        info!(
+            "Skipping MySQL updates for PsnDataKind: {:?}.",
+            psn_data_kind
+        );
+    } else {
         let mysql_table = get_mysql_table_name(psn_data_kind);
         let mysql_id_column = get_mysql_id_column(psn_data_kind);
 
@@ -273,8 +294,6 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
                 .await;
             }
         }
-    } else {
-        info!("Skipping MySQL updates for PsnDataKind::Training.");
     }
 
     info!("{} completed successfully.", task_display_name);
