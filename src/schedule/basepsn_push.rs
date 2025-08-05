@@ -24,7 +24,7 @@ pub struct BasePsnPushTask {
 impl BasePsnPushTask {
     pub fn new(
         pool: MySqlPool,
-        config: Arc<MssInfoConfig>,
+        mss_info_config: Arc<MssInfoConfig>,
         gateway_client: Arc<GatewayClient>,
         clickhouse_client: Arc<ClickHouseClient>,
         hit_date: Option<String>,
@@ -44,7 +44,7 @@ impl BasePsnPushTask {
 
         BasePsnPushTask {
             http_client,
-            mss_info_config: config,
+            mss_info_config,
             archiving_mapper: ArchivingMssMapper::new(pool_clone_for_mapper),
             push_result_parser: PushResultParser::new(pool_clone_for_parser),
             pool,

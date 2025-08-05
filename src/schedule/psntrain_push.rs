@@ -2,13 +2,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::config::MssInfoConfig;
 use crate::schedule::push_executor::{execute_push_task_logic, PsnDataWrapper, QueryType};
 use crate::schedule::BasePsnPushTask;
-use crate::utils::{ClickHouseClient, GatewayClient};
-use crate::{ClassData, DynamicPsnData, PsnDataKind, TaskExecutor};
+use crate::{AppContext, ClassData, DynamicPsnData, PsnDataKind, TaskExecutor};
 use anyhow::Result;
-use sqlx::{Execute, MySql, MySqlPool, QueryBuilder};
+use sqlx::{Execute, MySql, QueryBuilder};
 
 // 具体的任务结构体只包含 BasePsnPushTask 和它特有的数据
 pub struct PsnTrainPushTask {
@@ -50,19 +48,16 @@ impl PsnDataWrapper for PsnTrainPushTask {
 
 impl PsnTrainPushTask {
     pub fn new(
-        pool: MySqlPool,
-        config: Arc<MssInfoConfig>,
-        gateway_client: Arc<GatewayClient>,
-        clickhouse_client: Arc<ClickHouseClient>,
+        context: Arc<AppContext>,
         hit_date: Option<String>,
         train_ids: Option<Vec<String>>,
     ) -> Self {
-        PsnTrainPushTask {
+        Self {
             base: BasePsnPushTask::new(
-                pool,
-                config,
-                gateway_client,
-                clickhouse_client,
+                context.pool.clone(),
+                Arc::clone(&context.mss_info_config),
+                Arc::clone(&context.gateway_client),
+                Arc::clone(&context.clickhouse_client),
                 hit_date,
                 train_ids,
             ),

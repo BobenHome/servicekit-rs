@@ -6,20 +6,17 @@ use crate::{
         PsnLecturerScPushTask, PsnTrainPushTask, PsnTrainScPushTask, PsnTrainingPushTask,
         PsnTrainingScPushTask,
     },
-    utils::{ClickHouseClient, GatewayClient},
     web::{models::ApiResponse, PushDataParams},
-    AppConfig, TaskExecutor,
+    AppContext, TaskExecutor,
 };
 use actix_web::{post, web, HttpResponse, Result};
 use chrono::{Duration, NaiveDate};
-use sqlx::MySqlPool;
 use tracing::{error, info, warn};
 
 #[post("/pxb/pushMss")]
 pub async fn push_msss(
-    pool: web::Data<MySqlPool>,
-    app_config: web::Data<Arc<AppConfig>>, // 注入 AppConfig
-    body: web::Json<PushDataParams>,       // <--- 接收 JSON 请求体
+    app_context: web::Data<Arc<AppContext>>, // 注入 AppContext
+    body: web::Json<PushDataParams>,         // <--- 接收 JSON 请求体
 ) -> Result<HttpResponse> {
     // 验证请求参数
     if let Err(e) = body.validate() {
@@ -27,26 +24,11 @@ pub async fn push_msss(
     }
 
     // 克隆必要的配置和连接池，以便在异步任务中使用
-    let pool_clone = pool.get_ref().clone();
-    let app_config_arc = app_config.into_inner();
+    let app_context = Arc::clone(&app_context);
 
     tokio::spawn(async move {
         info!("********pxb mss pushByDate begin********");
-        // 使用从配置中读取配置
-        let gateway_client = Arc::new(GatewayClient::new(Arc::clone(
-            &app_config_arc.telecom_config,
-        )));
-        // 正确处理 ClickHouseClient 的初始化 Result
-        let clickhouse_client = Arc::new(
-            match ClickHouseClient::new(Arc::clone(&app_config_arc.clickhouse_config)) {
-                Ok(client) => client,
-                Err(e) => {
-                    error!("Failed to initialize ClickHouseClient: {:?}", e);
-                    // 如果 ClickHouse 客户端初始化失败，无法执行后续任务，直接返回
-                    return;
-                }
-            },
-        );
+
         // 直接从 `body` 结构体中获取数据，不再需要额外的 `clone()`
         let begin_date_opt = &body.begin_date;
         let end_date_opt = &body.end_date;
@@ -56,10 +38,7 @@ pub async fn push_msss(
         if let Some(ids) = train_ids_opt {
             // 情况 1: 提供了 train_ids
             process_push_tasks(
-                pool_clone.clone(),
-                Arc::clone(&app_config_arc),
-                Arc::clone(&gateway_client),
-                Arc::clone(&clickhouse_client),
+                Arc::clone(&app_context),
                 None,
                 Some(ids.to_vec()),
                 *is_sichuan_data,
@@ -68,35 +47,29 @@ pub async fn push_msss(
         } else if let (Some(begin_date_str), Some(end_date_str)) = (begin_date_opt, end_date_opt) {
             // 情况 2: 未提供 train_ids，根据日期处理
             let dates_to_process: Vec<String> =
-                match parse_date_range_strings(&begin_date_str, &end_date_str) {
+                match parse_date_range_strings(begin_date_str, end_date_str) {
                     Ok(dates) => dates, // 直接返回 dates，赋给 dates_to_process
                     Err(e) => {
-                        error!("日期解析错误: {}", e);
+                        error!("日期解析错误: {e}");
                         // 如果解析失败，返回一个空的 Vec，确保 dates_to_process 始终是 Vec<String>
                         Vec::new()
                     }
                 };
-            info!("解析到的日期范围: {:?}", dates_to_process);
+            info!("解析到的日期范围: {dates_to_process:?}");
             if dates_to_process.is_empty() {
                 warn!("解析日期后没有要处理的日期。");
             }
             // 遍历需要处理的每个日期
             for current_date in dates_to_process {
-                info!("=================={}=======================", current_date);
+                info!("=================={current_date} 开始处理=======================");
                 process_push_tasks(
-                    pool_clone.clone(),
-                    Arc::clone(&app_config_arc),
-                    Arc::clone(&gateway_client),
-                    Arc::clone(&clickhouse_client),
+                    Arc::clone(&app_context),
                     Some(current_date.clone()),
                     None,
                     *is_sichuan_data,
                 )
                 .await;
-                info!(
-                    "=================={} 处理完成=======================",
-                    current_date
-                );
+                info!("=================={current_date} 处理完成=======================");
             }
         }
         info!("********pxb mss pushByDate end********");
@@ -110,99 +83,72 @@ pub async fn push_msss(
 
 // --- 辅助函数：封装了创建和执行推送任务的逻辑 ---
 async fn process_push_tasks(
-    pool: MySqlPool,
-    app_config: Arc<AppConfig>,
-    gateway_client: Arc<GatewayClient>,
-    clickhouse_client: Arc<ClickHouseClient>,
+    app_context: Arc<AppContext>,
     hit_date: Option<String>,
     train_ids: Option<Vec<String>>,
     is_sichuan_data: bool,
 ) {
-    let task_name_suffix = if let Some(_) = &train_ids {
+    let task_name_suffix = if train_ids.is_some() {
         "根据培训班ID"
-    } else if let Some(_) = &hit_date {
+    } else if hit_date.is_some() {
         "根据日期"
     } else {
         "UNKNOWN"
     };
+
     let composite_task_name = if is_sichuan_data {
-        format!("四川省培训班数据归档到MSS{}", task_name_suffix)
+        format!("四川省培训班数据归档到MSS{task_name_suffix}")
     } else {
-        format!("培训班数据归档到MSS{}", task_name_suffix)
+        format!("培训班数据归档到MSS{task_name_suffix}")
     };
 
-    let composite_tasks: Vec<Arc<dyn TaskExecutor + Send + Sync + 'static>>;
-    if is_sichuan_data {
-        composite_tasks = vec![
+    let composite_tasks: Vec<Arc<dyn TaskExecutor + Send + Sync + 'static>> = if is_sichuan_data {
+        vec![
             Arc::new(PsnTrainScPushTask::new(
-                pool.clone(),
-                Arc::clone(&app_config.mss_info_config),
-                Arc::clone(&gateway_client),
-                Arc::clone(&clickhouse_client),
+                Arc::clone(&app_context),
                 hit_date.clone(),
                 train_ids.clone(),
             )),
             Arc::new(PsnLecturerScPushTask::new(
-                pool.clone(),
-                Arc::clone(&app_config.mss_info_config),
-                Arc::clone(&gateway_client),
-                Arc::clone(&clickhouse_client),
+                Arc::clone(&app_context),
                 hit_date.clone(),
                 train_ids.clone(),
             )),
             Arc::new(PsnArchiveScPushTask::new(
-                pool.clone(),
-                Arc::clone(&app_config.mss_info_config),
-                Arc::clone(&gateway_client),
-                Arc::clone(&clickhouse_client),
+                Arc::clone(&app_context),
                 hit_date.clone(),
                 train_ids.clone(),
             )),
             Arc::new(PsnTrainingScPushTask::new(
-                pool.clone(),
-                Arc::clone(&app_config.mss_info_config),
-                Arc::clone(&gateway_client),
-                Arc::clone(&clickhouse_client),
+                Arc::clone(&app_context),
                 hit_date.clone(),
                 train_ids.clone(),
             )),
-        ];
+        ]
     } else {
-        composite_tasks = vec![
+        vec![
             Arc::new(PsnTrainPushTask::new(
-                pool.clone(),
-                Arc::clone(&app_config.mss_info_config),
-                Arc::clone(&gateway_client),
-                Arc::clone(&clickhouse_client),
+                Arc::clone(&app_context),
                 hit_date.clone(),
                 train_ids.clone(),
             )),
             Arc::new(PsnLecturerPushTask::new(
-                pool.clone(),
-                Arc::clone(&app_config.mss_info_config),
-                Arc::clone(&gateway_client),
-                Arc::clone(&clickhouse_client),
+                Arc::clone(&app_context),
                 hit_date.clone(),
                 train_ids.clone(),
             )),
             Arc::new(PsnArchivePushTask::new(
-                pool.clone(),
-                Arc::clone(&app_config.mss_info_config),
-                Arc::clone(&gateway_client),
-                Arc::clone(&clickhouse_client),
+                Arc::clone(&app_context),
                 hit_date.clone(),
                 train_ids.clone(),
             )),
             Arc::new(PsnTrainingPushTask::new(
-                pool.clone(),
-                Arc::clone(&app_config.mss_info_config),
-                Arc::clone(&gateway_client),
-                Arc::clone(&clickhouse_client),
+                Arc::clone(&app_context),
                 hit_date.clone(),
                 train_ids.clone(),
             )),
-        ];
-    }
+        ]
+    };
     // 创建 CompositeTask 实例
     let composite_task = Arc::new(CompositeTask::new(composite_tasks, composite_task_name));
 
@@ -227,8 +173,7 @@ fn parse_date_range_strings(
 
         if current_date > end_date {
             return Err(format!(
-                "起始日期 {} 晚于结束日期 {}",
-                begin_date_str, end_date_str
+                "起始日期 {begin_date_str} 晚于结束日期 {end_date_str}"
             ));
         }
         while current_date <= end_date {
@@ -257,35 +202,27 @@ fn parse_date_range_strings(
                     // 确认是特殊月份格式
                     if begin_day > end_day {
                         return Err(format!(
-                            "特殊日期范围中，起始日 {} 晚于结束日 {}",
-                            begin_day, end_day
+                            "特殊日期范围中，起始日 {begin_day} 晚于结束日 {end_day}"
                         ));
                     }
                     for i in begin_day..=end_day {
-                        dates_to_process.push(format!(
-                            "{}-{:02}-{:02}",
-                            year,
-                            month, // 使用原始的非标准月份
-                            i
-                        ));
+                        dates_to_process.push(format!("{year}-{month:02}-{i:02}"));
+                        // 使用原始的非标准月份
                     }
                 } else {
                     // 月份在 1-12 范围内，但 `NaiveDate::parse_from_str` 失败，说明是其他格式错误
                     return Err(format!(
-                        "日期格式无效或解析失败：{} 或 {}",
-                        begin_date_str, end_date_str
+                        "日期格式无效或解析失败：{begin_date_str} 或 {end_date_str}"
                     ));
                 }
             } else {
                 return Err(format!(
-                    "日期组件解析失败 (非数字)：{} 或 {}",
-                    begin_date_str, end_date_str
+                    "日期组件解析失败 (非数字)：{begin_date_str} 或 {end_date_str}"
                 ));
             }
         } else {
             return Err(format!(
-                "日期格式不完整或无效：{} 或 {}",
-                begin_date_str, end_date_str
+                "日期格式不完整或无效：{begin_date_str} 或 {end_date_str}"
             ));
         }
     }

@@ -119,7 +119,7 @@ impl PushResultParser {
     ) {
         for &(key, data_type_val, id_field, result_field) in &REQUEST_KEYS {
             if let Some(array) = request_data.get(key).and_then(Value::as_array) {
-                if let Some(obj) = array.get(0).and_then(Value::as_object) {
+                if let Some(obj) = array.first().and_then(Value::as_object) {
                     if let Some(id_val) = obj.get(id_field).and_then(Value::as_str) {
                         push_result.data_type = Some(data_type_val);
 
@@ -143,7 +143,7 @@ impl PushResultParser {
     /// 解析JSON字符串
     fn parse_json(&self, input: &str) -> Result<Value, String> {
         serde_json::from_str(input)
-            .map_err(|e| format!("Failed to parse JSON: {:?}, Input: {}", e, input))
+            .map_err(|e| format!("Failed to parse JSON: {e:?}, Input: {input}"))
     }
 
     /// 处理结果解析错误
@@ -170,14 +170,14 @@ impl PushResultParser {
             .get("data")
             .and_then(Value::as_str)
             .ok_or_else(|| {
-                let err = format!("Missing 'data' field in result JSON: {:?}", result_data);
-                error!("{}", err);
+                let err = format!("Missing 'data' field in result JSON: {result_data:?}");
+                error!("{err}");
                 push_result.error_msg = Some(err.clone());
                 err
             })?;
 
         let error_data = self.parse_json(raw_data_str).map_err(|e| {
-            error!("{}", e);
+            error!("{e}");
             push_result.error_msg = Some(e.clone());
             e
         })?;
@@ -193,7 +193,7 @@ impl PushResultParser {
         if let Some(error_data_obj) = error_data.as_object() {
             for &(key, data_type_val, id_field) in &ERROR_KEYS {
                 if let Some(array) = error_data_obj.get(key).and_then(Value::as_array) {
-                    if let Some(obj) = array.get(0).and_then(Value::as_object) {
+                    if let Some(obj) = array.first().and_then(Value::as_object) {
                         push_result.data_type = Some(data_type_val);
 
                         // 提取ID字段
@@ -241,7 +241,7 @@ impl PushResultParser {
             .record(push_result, result_details)
             .await
         {
-            error!("Failed to record push result: {:?}", e);
+            error!("Failed to record push result: {e:?}");
         }
     }
 }

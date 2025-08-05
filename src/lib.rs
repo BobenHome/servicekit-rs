@@ -14,6 +14,7 @@ pub trait TaskExecutor: Send + Sync + 'static {
 }
 
 pub mod config;
+pub mod context;
 pub mod db;
 pub mod logging;
 pub mod mappers;
@@ -30,4 +31,5 @@ pub use config::{AppConfig, ClickhouseConfig, MssInfoConfig};
 pub use mappers::archiving_mss_mapper::{ArchivingMssMapper, RecordMssReply};
 pub use parsers::push_result_parser::PushResultParser;
 
+pub use context::AppContext;
 pub use utils::mss_client::psn_dos_push;

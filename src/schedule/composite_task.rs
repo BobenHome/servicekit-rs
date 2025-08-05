@@ -28,7 +28,7 @@ impl TaskExecutor for CompositeTask {
         let task_name_clone = self.task_name.clone();
 
         Box::pin(async move {
-            info!("********任务 '{}' 开始。", task_name_clone);
+            info!("********任务 '{task_name_clone}' 开始。");
             for (i, task) in tasks_clone.iter().enumerate() {
                 let current_task_name = format!(
                     "子任务 {} #{} ({}的第{}个任务)",
@@ -37,14 +37,14 @@ impl TaskExecutor for CompositeTask {
                     task_name_clone,
                     i + 1
                 );
-                info!("  开始执行 {}", current_task_name); // 缩进表示子任务
+                info!("  开始执行 {current_task_name}"); // 缩进表示子任务
                 if let Err(e) = task.execute().await {
-                    error!("  执行 {} 异常: {:?}", current_task_name, e);
+                    error!("  执行 {current_task_name} 异常: {e:?}");
                 } else {
-                    info!("  {} 执行成功。", current_task_name);
+                    info!("  {current_task_name} 执行成功。");
                 }
             }
-            info!("********任务 '{}' 结束。", task_name_clone);
+            info!("********任务 '{task_name_clone}' 结束。");
             Ok(())
         })
     }

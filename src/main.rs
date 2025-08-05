@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use chrono::Local;
-use servicekit::utils::{ClickHouseClient, GatewayClient};
 use tracing::{error, info};
 //servicekit是crate 名称（在 Cargo.toml 中定义），代表了库。db::pool, schedule::PsntrainPushTask, WebServer 这些都是从 lib.rs 中 pub use 或 pub mod 导出的项。如果 lib.rs 不存在或者没有正确地导出这些模块，main.rs 将无法直接通过 servicekit:: 路径来访问它们
 use servicekit::config::AppConfig;
@@ -9,7 +8,7 @@ use servicekit::schedule::{
     PsnLecturerScPushTask, PsnTrainScPushTask, PsnTrainingPushTask, PsnTrainingScPushTask,
 };
 use servicekit::{db::pool, schedule::PsnTrainPushTask, WebServer};
-use servicekit::{logging, TaskExecutor};
+use servicekit::{logging, AppContext, TaskExecutor};
 use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler};
 
@@ -22,11 +21,7 @@ async fn main() -> Result<()> {
 
     // 2. 加载应用程序配置
     let app_config = AppConfig::new().context("Failed to load application configuration")?;
-    info!(
-        "Application configuration loaded successfully: {:?}",
-        app_config
-    );
-    // let app_config_clone = app_config.clone(); // 克隆配置以便后续使用
+    info!("Application configuration loaded successfully: {app_config:?}");
     // 将 app_config 包装成 Arc，因为后续多个地方会共享它
     let app_config_arc = Arc::new(app_config); // <--- 在这里创建 Arc<AppConfig>
 
@@ -43,93 +38,62 @@ async fn main() -> Result<()> {
         .context("Failed to create scheduler")?;
     info!("Scheduler initialized.");
 
-    // 使用从配置中读取配置
-    let gateway_client = Arc::new(GatewayClient::new(Arc::clone(
-        &app_config_arc.telecom_config,
-    )));
-    // --- Initialize ClickHouseClient ---
-    let clickhouse_client = Arc::new(
-        ClickHouseClient::new(Arc::clone(&app_config_arc.clickhouse_config))
-            .context("Failed to initialize ClickHouseClient")?,
-    );
-    info!("ClickHouseClient initialized.");
-
-    // 5. 创建 PsnTrainPushTask 实例
-    let push_train_task = Arc::new(PsnTrainPushTask::new(
-        pool.clone(),
+    // 5. 创建AppContext实例
+    let app_context = AppContext::new(
+        pool,
         Arc::clone(&app_config_arc.mss_info_config),
-        Arc::clone(&gateway_client),
-        Arc::clone(&clickhouse_client),
-        None,
-        None,
-    ));
+        Arc::clone(&app_config_arc.telecom_config),
+        Arc::clone(&app_config_arc.clickhouse_config),
+    )?;
 
-    // 6. 创建 PsnLecturerPushTask 实例
+    // 6. 创建 PsnTrainPushTask 实例
+    let push_train_task = Arc::new(PsnTrainPushTask::new(Arc::clone(&app_context), None, None));
+
+    // 7. 创建 PsnLecturerPushTask 实例
     let push_lecturer_task = Arc::new(PsnLecturerPushTask::new(
-        pool.clone(),
-        Arc::clone(&app_config_arc.mss_info_config),
-        Arc::clone(&gateway_client),
-        Arc::clone(&clickhouse_client),
+        Arc::clone(&app_context),
         None,
         None,
     ));
 
-    // 7. 创建 PsnTrainingPushTask 实例
+    // 8. 创建 PsnTrainingPushTask 实例
     let push_training_task = Arc::new(PsnTrainingPushTask::new(
-        pool.clone(),
-        Arc::clone(&app_config_arc.mss_info_config),
-        Arc::clone(&gateway_client),
-        Arc::clone(&clickhouse_client),
+        Arc::clone(&app_context),
         None,
         None,
     ));
 
-    // 8. 创建 PsnArchivePushTask 实例
+    // 9. 创建 PsnArchivePushTask 实例
     let push_archive_task = Arc::new(PsnArchivePushTask::new(
-        pool.clone(),
-        Arc::clone(&app_config_arc.mss_info_config),
-        Arc::clone(&gateway_client),
-        Arc::clone(&clickhouse_client),
+        Arc::clone(&app_context),
         None,
         None,
     ));
 
-    // 9. 创建 PsnTrainScPushTask 实例
+    // 10. 创建 PsnTrainScPushTask 实例
     let push_train_sc_task = Arc::new(PsnTrainScPushTask::new(
-        pool.clone(),
-        Arc::clone(&app_config_arc.mss_info_config),
-        Arc::clone(&gateway_client),
-        Arc::clone(&clickhouse_client),
+        Arc::clone(&app_context),
         None,
         None,
     ));
 
-    // 10. 创建 PsnLecturerScPushTask 实例
+    // 11. 创建 PsnLecturerScPushTask 实例
     let push_lecturer_sc_task = Arc::new(PsnLecturerScPushTask::new(
-        pool.clone(),
-        Arc::clone(&app_config_arc.mss_info_config),
-        Arc::clone(&gateway_client),
-        Arc::clone(&clickhouse_client),
+        Arc::clone(&app_context),
         None,
         None,
     ));
 
-    // 11. 创建 PsnTrainingScPushTask 实例
+    // 12. 创建 PsnTrainingScPushTask 实例
     let push_training_sc_task = Arc::new(PsnTrainingScPushTask::new(
-        pool.clone(),
-        Arc::clone(&app_config_arc.mss_info_config),
-        Arc::clone(&gateway_client),
-        Arc::clone(&clickhouse_client),
+        Arc::clone(&app_context),
         None,
         None,
     ));
 
-    // 12. 创建 PsnArchiveScPushTask 实例
+    // 13. 创建 PsnArchiveScPushTask 实例
     let push_archive_sc_task = Arc::new(PsnArchiveScPushTask::new(
-        pool.clone(),
-        Arc::clone(&app_config_arc.mss_info_config),
-        Arc::clone(&gateway_client),
-        Arc::clone(&clickhouse_client),
+        Arc::clone(&app_context),
         None,
         None,
     ));
@@ -151,7 +115,7 @@ async fn main() -> Result<()> {
         "培训班数据归档到MSS定时任务".to_string(),
     ));
 
-    // 13. 使用辅助函数创建并添加 CompositeTask 的 Cron Job
+    // 14. 使用辅助函数创建并添加 CompositeTask 的 Cron Job
     create_and_schedule_task_job(
         &scheduler,
         main_scheduled_composite_task, // Arc<CompositeTask> 会自动转换为 Arc<dyn TaskExecutor>
@@ -160,20 +124,20 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    // 14. 在后台启动调度器，这样它就不会阻塞 Web 服务器的启动
+    // 15. 在后台启动调度器，这样它就不会阻塞 Web 服务器的启动
     tokio::spawn(async move {
         info!("Attempting to start scheduler in background...");
         // 显式处理 scheduler.start().await 的 Result
         if let Err(e) = scheduler.start().await {
-            error!("Failed to start scheduler in background: {:?}", e);
+            error!("Failed to start scheduler in background: {e:?}");
             // 这里你可以选择根据错误类型执行更多操作，例如尝试重新启动或记录更详细的错误信息
         } else {
             info!("Scheduler successfully started in background.");
         }
     });
 
-    // 15.启动 Web 服务器
-    let server = WebServer::new(pool, Arc::clone(&app_config_arc));
+    // 16.启动 Web 服务器
+    let server = WebServer::new(app_config_arc.web_server_port, Arc::clone(&app_context));
     server.start().await.context("Failed to start web server")?;
 
     info!("Application shut down cleanly.");
@@ -212,59 +176,50 @@ async fn create_and_schedule_task_job(
                         .to_string(),
                     Ok(None) => "No next tick".to_string(),
                     Err(e) => {
-                        error!("Error getting next tick for job {:?}: {:?}", uuid, e);
+                        error!("Error getting next tick for job {uuid:?}: {e:?}");
                         "Error getting next tick".to_string()
                     }
                 };
                 info!(
-                    "Job '{}' ({:?}) is running. Next scheduled time (local): {}",
-                    job_name_for_future, uuid, next_scheduled_time_str
+                    "Job '{job_name_for_future}' ({uuid:?}) is running. Next scheduled time (local): {next_scheduled_time_str}"
                 );
 
                 // --- 执行主任务 ---
                 if let Err(e) = primary_task_for_future.execute().await {
                     error!(
-                        "Error executing primary job '{}' {:?}: {:?}",
-                        job_name_for_future, uuid, e
+                        "Error executing primary job '{job_name_for_future}' {uuid:?}: {e:?}"
                     );
                 } else {
                     info!(
-                        "Primary job '{}' ({:?}) completed successfully.",
-                        job_name_for_future, uuid
+                        "Primary job '{job_name_for_future}' ({uuid:?}) completed successfully."
                     );
                     // --- 遍历并执行所有依赖任务 ---
                     if dependent_tasks_for_future.is_empty() {
                         info!(
-                            "No dependent tasks to execute for '{}'.",
-                            job_name_for_future
+                            "No dependent tasks to execute for '{job_name_for_future}'."
                         );
                     } else {
                         info!(
-                            "Starting {} dependent tasks for '{}'.",
-                            dependent_tasks_for_future.len(),
-                            job_name_for_future
+                            "Starting {} dependent tasks for '{job_name_for_future}'.",
+                            dependent_tasks_for_future.len()
                         );
                         for (i, dep_task) in dependent_tasks_for_future.iter().enumerate() {
                             info!(
-                                "Executing dependent task #{} for '{}'.",
-                                i + 1,
-                                job_name_for_future
+                                "Executing dependent task #{} for '{job_name_for_future}'.",
+                                i + 1
                             );
                             // 依赖任务本身会打印其执行状态的日志
                             if let Err(e) = dep_task.execute().await {
                                 error!(
-                                    "Error executing dependent task #{} for '{}': {:?}",
-                                    i + 1,
-                                    job_name_for_future,
-                                    e
+                                    "Error executing dependent task #{} for '{job_name_for_future}': {e:?}",
+                                    i + 1
                                 );
                                 // 如果某个依赖任务失败，你可以选择是中断后续依赖任务，还是继续
                                 // 这里我们选择继续执行其他依赖任务，但会记录错误
                             } else {
                                 info!(
-                                    "Dependent task #{} for '{}' completed successfully.",
-                                    i + 1,
-                                    job_name_for_future
+                                    "Dependent task #{} for '{job_name_for_future}' completed successfully.",
+                                    i + 1
                                 );
                             }
                         }
@@ -273,12 +228,12 @@ async fn create_and_schedule_task_job(
             })
         },
     )
-    .context(format!("Failed to create cron job '{}'", job_name))?;
+    .context(format!("Failed to create cron job '{job_name}'"))?;
 
     scheduler
         .add(job)
         .await
-        .context(format!("Failed to add job '{}' to scheduler", job_name))?;
-    info!("Job '{}' added to scheduler.", job_name);
+        .context(format!("Failed to add job '{job_name}' to scheduler"))?;
+    info!("Job '{job_name}' added to scheduler.");
     Ok(())
 }

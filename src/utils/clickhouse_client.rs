@@ -27,7 +27,7 @@ impl ClickHouseClient {
                 );
                 info!("Initializing ClickHouse client for: {}", url);
                 let pool = Pool::new(url);
-                clients.push((format!("{}:{}", host, port), Arc::new(pool)));
+                clients.push((format!("{host}:{port}"), Arc::new(pool)));
             }
         }
 
@@ -45,16 +45,16 @@ impl ClickHouseClient {
         for (addr, pool) in &self.clients {
             match pool.get_handle().await {
                 Ok(mut client) => {
-                    info!("Executing query on ClickHouse node: {}", addr);
+                    info!("Executing query on ClickHouse node: {addr}");
                     if let Err(e) = client.execute(sql).await {
-                        error!("Failed to execute query on {}: {:?}", addr, e);
+                        error!("Failed to execute query on {addr}: {e:?}");
                         all_success = false;
                     } else {
-                        info!("Query executed successfully on: {}", addr);
+                        info!("Query executed successfully on: {addr}");
                     }
                 }
                 Err(e) => {
-                    error!("Failed to get connection handle for {}: {:?}", addr, e);
+                    error!("Failed to get connection handle for {addr}: {e:?}");
                     all_success = false;
                 }
             }

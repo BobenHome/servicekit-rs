@@ -1,37 +1,28 @@
 use std::sync::Arc;
 
-use crate::{web::handlers, AppConfig};
+use crate::{web::handlers, AppContext};
 use actix_web::{middleware, web, App, HttpServer};
 use anyhow::{Context, Result}; // 导入 anyhow::Result 和 Context trait
-use sqlx::MySqlPool;
 use tracing::info;
 
 pub struct WebServer {
     port: u16,
-    pool: MySqlPool,
-    app_config: Arc<AppConfig>,
+    app_context: Arc<AppContext>,
 }
 
 impl WebServer {
-    pub fn new(pool: MySqlPool, app_config: Arc<AppConfig>) -> Self {
-        WebServer {
-            port: app_config.web_server_port,
-            pool,
-            app_config,
-        }
+    pub fn new(port: u16, app_context: Arc<AppContext>) -> Self {
+        WebServer { port, app_context }
     }
 
     pub async fn start(&self) -> Result<()> {
-        info!("Starting web server on port {}", self.port); // 使用 info! 宏
+        info!("Starting web server on port {}", self.port);
 
-        let pool = self.pool.clone();
-        // let app_config = self.app_config.clone();
-        let app_config_for_app = Arc::clone(&self.app_config); 
+        let app_context = Arc::clone(&self.app_context);
 
         HttpServer::new(move || {
             App::new()
-                .app_data(web::Data::new(pool.clone())) // 在每个 worker 线程中克隆一次 pool
-                .app_data(web::Data::new(app_config_for_app.clone()))
+                .app_data(web::Data::new(Arc::clone(&app_context))) // 在每个 worker 线程中克隆一次
                 .wrap(middleware::Logger::default()) // 启用请求日志
                 .wrap(middleware::Compress::default()) // 启用响应压缩
                 .service(

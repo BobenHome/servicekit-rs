@@ -87,21 +87,18 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
 
     let query_type = if let Some(date_str) = base_task.hit_date.clone() {
         // <--- 克隆 String 以便 QueryType 拥有
-        info!("Processing data for specific date: {}", date_str);
+        info!("Processing data for specific date: {date_str}");
         QueryType::ByDate(date_str) // <--- 传递拥有所有权的 String
     } else if let Some(ids) = base_task.train_ids.clone() {
         // <--- 克隆 Vec<String> 以便 QueryType 拥有
-        info!("Processing data for specific IDs: {:?}", ids);
+        info!("Processing data for specific IDs: {ids:?}");
         QueryType::ByIds(ids) // <--- 传递拥有所有权的 Vec<String>
     } else {
         // 如果没有提供 train_ids 和 hit_date，则回退到计算“昨天”的日期
         let today = Local::now().date_naive();
         let yesterday = today - Duration::days(1);
         let hit_date_calculated = yesterday.format("%Y-%m-%d").to_string(); // <--- 创建拥有所有权的 String
-        info!(
-            "Processing data for calculated hit_date: {}",
-            hit_date_calculated
-        );
+        info!("Processing data for calculated hit_date: {hit_date_calculated}");
         QueryType::ByDate(hit_date_calculated) // <--- 传递拥有所有权的 String
     };
 
@@ -110,8 +107,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
         .fetch_all(&base_task.pool)
         .await
         .context(format!(
-            "Failed to fetch {} data from database",
-            task_display_name
+            "Failed to fetch {task_display_name} data from database"
         ))?;
 
     // 存储成功和失败的 ID
@@ -119,11 +115,11 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
     let mut failed_ids: Vec<(String, Option<String>)> = Vec::new();
 
     if datas.is_empty() {
-        info!("No data found for task: {}", task_display_name);
+        info!("No data found for task: {task_display_name}");
         return Ok(());
     }
     for data in datas {
-        info!("Found {}: {:?}", task_display_name, data);
+        info!("Found {task_display_name}: {data:?}");
         let psn_data_enum = W::wrap_data(data);
 
         let current_id = psn_data_enum.get_data_id().to_string();
@@ -144,9 +140,8 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
             }
         } else {
             info!(
-                "Successfully sent data of type '{}' to third party. Task: {}",
-                psn_data_enum.get_key_name(),
-                task_display_name
+                "Successfully sent data of type '{}' to third party. Task: {task_display_name}",
+                psn_data_enum.get_key_name()
             );
             success_ids.push(current_id);
             // 成功后调用小助手接口，写入归档成功的班级
@@ -175,31 +170,26 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
             | PsnDataKind::ArchiveSc
     ) {
         // 不更新 ClickHouse
-        info!(
-            "Skipping ClickHouse updates for PsnDataKind: {:?}.",
-            psn_data_kind
-        );
+        info!("Skipping ClickHouse updates for PsnDataKind: {psn_data_kind:?}.");
     } else {
         // 在数据处理前，直接从 PsnDataWrapper 获取 ClickHouse 的表和ID字段
         let clickhouse_table = get_clickhouse_table_name(psn_data_kind);
         let clickhouse_id_column = get_clickhouse_id_column(psn_data_kind);
         info!(
-            "Processing data for ClickHouse table: '{}' using ID column: '{}' for task: {}",
-            clickhouse_table, clickhouse_id_column, task_display_name
+            "Processing data for ClickHouse table: '{clickhouse_table}' using ID column: '{clickhouse_id_column}' for task: {task_display_name}"
         );
 
         if !success_ids.is_empty() {
             for chunk in success_ids.chunks(BATCH_SIZE) {
                 let ids_for_query = chunk
                     .iter()
-                    .map(|id| format!("'{}'", id))
+                    .map(|id| format!("'{id}'"))
                     .collect::<Vec<String>>()
                     .join(",");
 
                 let status = "1"; // Success status
                 let query_sql = format!(
-                    "ALTER TABLE {} UPDATE trainNotifyMss = '{}' WHERE {} IN ({})",
-                    clickhouse_table, status, clickhouse_id_column, ids_for_query
+                    "ALTER TABLE {clickhouse_table} UPDATE trainNotifyMss = '{status}' WHERE {clickhouse_id_column} IN ({ids_for_query})"
                 );
                 info!("Attempting to update success status in ClickHouse.");
                 base_task
@@ -213,7 +203,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
             for chunk in failed_ids.chunks(BATCH_SIZE) {
                 let ids_for_query = chunk
                     .iter()
-                    .map(|(id, _)| format!("'{}'", id))
+                    .map(|(id, _)| format!("'{id}'"))
                     .collect::<Vec<String>>()
                     .join(",");
                 let status = "2"; // Error status
@@ -221,14 +211,13 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
                 // Log detailed error reasons for this batch
                 for (id, reason_opt) in chunk.iter() {
                     if let Some(reason) = reason_opt {
-                        error!("Failed Lecturer ID: {}, Reason: {}", id, reason);
+                        error!("Failed Lecturer ID: {id}, Reason: {reason}");
                     } else {
-                        error!("Failed ID (other type): {}", id);
+                        error!("Failed ID (other type): {id}");
                     }
                 }
                 let query_sql = format!(
-                    "ALTER TABLE {} UPDATE trainNotifyMss = '{}' WHERE {} IN ({})",
-                    clickhouse_table, status, clickhouse_id_column, ids_for_query
+                    "ALTER TABLE {clickhouse_table} UPDATE trainNotifyMss = '{status}' WHERE {clickhouse_id_column} IN ({ids_for_query})"
                 );
                 info!("Attempting to update error status in ClickHouse.");
                 base_task
@@ -245,10 +234,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
         PsnDataKind::Training | PsnDataKind::TrainingSc
     ) {
         // 不更新 MySQL
-        info!(
-            "Skipping MySQL updates for PsnDataKind: {:?}.",
-            psn_data_kind
-        );
+        info!("Skipping MySQL updates for PsnDataKind: {psn_data_kind:?}.");
     } else {
         let mysql_table = get_mysql_table_name(psn_data_kind);
         let mysql_id_column = get_mysql_id_column(psn_data_kind);
@@ -256,8 +242,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
         // 只有 PsnDataKind::Lecturer 类型需要更新 trainNotifyMssMessage 字段
         let update_message_field = psn_data_kind == PsnDataKind::Lecturer; // <--- 根据类型设置此标志
         info!(
-                "Attempting MySQL updates for PsnDataKind::{:?} (Table: '{}', ID Column: '{}', Update message field: {}).",
-                psn_data_kind, mysql_table, mysql_id_column, update_message_field
+                "Attempting MySQL updates for PsnDataKind::{psn_data_kind:?} (Table: '{mysql_table}', ID Column: '{mysql_id_column}', Update message field: {update_message_field})."
             );
 
         // 处理成功 ID 的 MySQL 更新
@@ -296,7 +281,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
         }
     }
 
-    info!("{} completed successfully.", task_display_name);
+    info!("{task_display_name} completed successfully.");
 
     Ok(())
 }
@@ -320,8 +305,7 @@ pub async fn update_notify_mss_mysql(
 
     // 构建 UPDATE ... SET trainNotifyMss = CASE <id_column> WHEN <id_value> THEN <status> ... END
     let mut query_builder: QueryBuilder<MySql> = QueryBuilder::new(format!(
-        "UPDATE {} SET trainNotifyMss = CASE {} ",
-        table_name, id_column
+        "UPDATE {table_name} SET trainNotifyMss = CASE {id_column} "
     ));
 
     // 为每个 item 构建 WHEN ... THEN ... 部分
@@ -335,7 +319,7 @@ pub async fn update_notify_mss_mysql(
 
     // 根据 `update_message_field` 参数来决定是否包含 `trainNotifyMssMessage` 的更新逻辑
     if update_message_field {
-        query_builder.push(format!(", trainNotifyMssMessage = CASE {} ", id_column));
+        query_builder.push(format!(", trainNotifyMssMessage = CASE {id_column} "));
         for (id, msg_opt) in items {
             query_builder.push(" WHEN "); // 推送 SQL 关键字
             query_builder.push_bind(id.clone()); // 绑定 ID 值
@@ -353,7 +337,7 @@ pub async fn update_notify_mss_mysql(
     }
 
     // 构建 WHERE id IN (...)
-    query_builder.push(format!(" WHERE {} IN (", id_column));
+    query_builder.push(format!(" WHERE {id_column} IN ("));
     let mut separated = query_builder.separated(", ");
     for (id, _) in items {
         separated.push_bind(id);
@@ -363,8 +347,7 @@ pub async fn update_notify_mss_mysql(
     let query = query_builder.build();
 
     info!(
-        "Executing MySQL update query for table '{}', ID column '{}'. Status: {}, Items count: {}, Update message field: {}",
-        table_name, id_column, status, items.len(), update_message_field
+        "Executing MySQL update query for table '{table_name}', ID column '{id_column}'. Status: {status}, Items count: {}, Update message field: {update_message_field}", items.len()
     );
     // 打印构建的 SQL 语句和绑定参数，便于调试验证
     info!("Built MySQL update query: {}", query.sql());
@@ -372,15 +355,13 @@ pub async fn update_notify_mss_mysql(
     match query.execute(pool).await {
         Ok(result) => {
             info!(
-                "MySQL update for table '{}' completed. Rows affected: {}",
-                table_name,
+                "MySQL update for table '{table_name}' completed. Rows affected: {}",
                 result.rows_affected()
             );
         }
         Err(e) => {
             error!(
-                "Failed to update MySQL table '{}' (status: {}, items: {:?}): {:?}",
-                table_name, status, items, e
+                "Failed to update MySQL table '{table_name}' (status: {status}, items: {items:?}): {e:?}"
             );
         }
     }

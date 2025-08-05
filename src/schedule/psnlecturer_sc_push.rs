@@ -3,12 +3,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
-use sqlx::{Execute, MySql, MySqlPool, QueryBuilder};
+use sqlx::{Execute, MySql, QueryBuilder};
 
 use crate::schedule::push_executor::{execute_push_task_logic, PsnDataWrapper, QueryType};
 use crate::schedule::BasePsnPushTask;
-use crate::utils::{ClickHouseClient, GatewayClient};
-use crate::{LecturerData, MssInfoConfig, PsnDataKind, TaskExecutor};
+use crate::{AppContext, LecturerData, PsnDataKind, TaskExecutor};
 
 pub struct PsnLecturerScPushTask {
     base: BasePsnPushTask, // <-- 嵌入 BasePsnPushTask
@@ -46,19 +45,16 @@ impl PsnDataWrapper for PsnLecturerScPushTask {
 
 impl PsnLecturerScPushTask {
     pub fn new(
-        pool: MySqlPool,
-        config: Arc<MssInfoConfig>,
-        gateway_client: Arc<GatewayClient>,
-        clickhouse_client: Arc<ClickHouseClient>,
+        context: Arc<AppContext>,
         hit_date: Option<String>,
         train_ids: Option<Vec<String>>,
     ) -> Self {
         PsnLecturerScPushTask {
             base: BasePsnPushTask::new(
-                pool,
-                config,
-                gateway_client,
-                clickhouse_client,
+                context.pool.clone(),
+                Arc::clone(&context.mss_info_config),
+                Arc::clone(&context.gateway_client),
+                Arc::clone(&context.clickhouse_client),
                 hit_date,
                 train_ids,
             ),

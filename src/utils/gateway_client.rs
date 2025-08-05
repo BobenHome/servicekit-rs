@@ -78,31 +78,22 @@ impl GatewayClient {
             ))?;
 
         let status = response.status();
-        info!("Gateway response status: {}", status);
+        info!("Gateway response status: {status}");
 
         let response_text = response
             .text()
             .await
             .context("Failed to read response body from gateway")?;
         if status.is_success() {
-            info!(
-                "Gateway call successful. Status: {}. Response: {}",
-                status, response_text
-            );
+            info!("Gateway call successful. Status: {status}. Response: {response_text}");
             // 尝试将 JSON 响应体反序列化为 ServiceMessageReplyBuffer
             serde_json::from_str(&response_text).context(format!(
-                "Failed to parse successful gateway response JSON from '{}'",
-                response_text
+                "Failed to parse successful gateway response JSON from '{response_text}'"
             ))
         } else {
-            error!(
-                "Gateway call failed with status: {} and body: {}",
-                status, response_text
-            );
+            error!("Gateway call failed with status: {status} and body: {response_text}");
             Err(anyhow!(
-                "Gateway call failed: Status={}, Body={}",
-                status,
-                response_text
+                "Gateway call failed: Status={status}, Body={response_text}",
             ))
         }
     }

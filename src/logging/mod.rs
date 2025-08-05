@@ -48,7 +48,7 @@ impl LocalTimeRollingWriter {
     pub fn new(log_dir: &str) -> Result<Self> {
         let log_path = PathBuf::from(log_dir);
         fs::create_dir_all(&log_path)
-            .context(format!("Failed to create log directory: {:?}", log_path))?;
+            .context(format!("Failed to create log directory: {log_path:?}"))?;
 
         let now = Local::now();
         let current_day = now.day(); // 依赖 Datelike
@@ -64,8 +64,7 @@ impl LocalTimeRollingWriter {
             .append(true) // 追加模式
             .open(&initial_file_path)
             .context(format!(
-                "Failed to open initial log file: {:?}",
-                initial_file_path
+                "Failed to open initial log file: {initial_file_path:?}"
             ))?;
 
         Ok(LocalTimeRollingWriter {
@@ -79,15 +78,14 @@ impl LocalTimeRollingWriter {
     fn archive_old_app_log_if_needed(log_dir: &Path, now: &chrono::DateTime<Local>) -> Result<()> {
         let app_log_path = log_dir.join("app.log");
 
-        println!("INFO: Checking for old app.log at {:?}", app_log_path);
+        println!("INFO: Checking for old app.log at {app_log_path:?}");
 
         if app_log_path.exists() {
             let metadata = fs::metadata(&app_log_path)
-                .context(format!("Failed to read metadata for {:?}", app_log_path))?;
-            let modified_time = metadata.modified().context(format!(
-                "Failed to get modified time for {:?}",
-                app_log_path
-            ))?;
+                .context(format!("Failed to read metadata for {app_log_path:?}"))?;
+            let modified_time = metadata
+                .modified()
+                .context(format!("Failed to get modified time for {app_log_path:?}"))?;
 
             let local_modified_time: chrono::DateTime<Local> = modified_time.into();
             let today_date = now.date_naive();
@@ -102,8 +100,7 @@ impl LocalTimeRollingWriter {
                     archive_path
                 );
                 fs::rename(&app_log_path, &archive_path).context(format!(
-                    "Failed to rename old app.log from {:?} to {:?}",
-                    app_log_path, archive_path
+                    "Failed to rename old app.log from {app_log_path:?} to {archive_path:?}"
                 ))?;
             }
         }
@@ -148,13 +145,10 @@ impl LocalTimeRollingWriter {
                     // 仅在此处锁定 active_file_guard 以替换 File
                     let mut active_file_guard = self.active_file.lock().unwrap();
                     *active_file_guard = new_file; // 替换 Mutex 内部的 File
-                    println!("INFO: New log file opened: {:?}", new_file_path);
+                    println!("INFO: New log file opened: {new_file_path:?}");
                 }
                 Err(e) => {
-                    eprintln!(
-                        "ERROR: Failed to open new daily log file {:#?}: {:?}",
-                        new_file_path, e
-                    );
+                    eprintln!("ERROR: Failed to open new daily log file {new_file_path:#?}: {e:?}");
                     // 如果打开新文件失败，不替换旧文件。
                     // 日志将继续写入到上一天的文件。
                 }
@@ -206,7 +200,7 @@ pub fn init_logging() -> Result<()> {
         .with_line_number(true)
         .with_file(true)
         .with_level(true)
-        .with_filter(EnvFilter::new("debug")); // 文件日志通常使用 debug 级别
+        .with_filter(EnvFilter::new("info")); // 文件日志通常使用 info 级别
 
     // 3. 创建一个 fmt 层用于控制台输出
     let stdout_layer = fmt::layer()
@@ -217,7 +211,7 @@ pub fn init_logging() -> Result<()> {
         .with_line_number(true)
         .with_file(true)
         .with_level(true)
-        .with_filter(EnvFilter::new("debug")); // 控制台日志通常使用 debug 级别
+        .with_filter(EnvFilter::new("info")); // 控制台日志通常使用 info 级别
 
     // 4. 将两个层组合起来并初始化全局订阅者
     tracing_subscriber::registry()

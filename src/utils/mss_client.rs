@@ -37,8 +37,8 @@ pub async fn psn_dos_push(
     let result_of_send_loop: Result<(), anyhow::Error> = loop {
         request_attempt += 1;
         info!(
-            "Attempting to send data to {} (Attempt {}), key: {}",
-            mss_info_config.app_url, request_attempt, dynamic_key_name
+            "Attempting to send data to {} (Attempt {request_attempt}), key: {dynamic_key_name}",
+            mss_info_config.app_url
         );
 
         if request_attempt > 1 {
@@ -68,13 +68,12 @@ pub async fn psn_dos_push(
                     Err(e) => {
                         // 读取响应体失败
                         error!(
-                            "Failed to read response body for {}: {:?}",
-                            mss_info_config.app_url, e
+                            "Failed to read response body for {}: {e:?}",
+                            mss_info_config.app_url
                         );
                         break Err(anyhow!(
-                            "Failed to read response body for {}: {:?}",
-                            mss_info_config.app_url,
-                            e
+                            "Failed to read response body for {}: {e:?}",
+                            mss_info_config.app_url
                         ));
                     }
                 }
@@ -82,28 +81,26 @@ pub async fn psn_dos_push(
             Err(e) => {
                 // 发送请求失败 (网络不通, DNS 查找失败等)
                 error!(
-                    "Failed to send HTTP request to {}: {:?}",
-                    mss_info_config.app_url, e
+                    "Failed to send HTTP request to {}: {e:?}",
+                    mss_info_config.app_url
                 );
                 break Err(anyhow!(
-                    "Failed to send HTTP request to {}: {:?}",
-                    mss_info_config.app_url,
-                    e
+                    "Failed to send HTTP request to {}: {e:?}",
+                    mss_info_config.app_url
                 ));
             }
         }
 
         info!(
-            "Received response for {} (Attempt {}): Status={}, Body={}",
-            mss_info_config.app_url, request_attempt, current_status, current_http_body_str
+            "Received response for {} (Attempt {request_attempt}): Status={current_status}, Body={current_http_body_str}",
+            mss_info_config.app_url
         );
 
         if current_status.is_success() {
             if have_rest(&current_http_body_str) {
                 if request_attempt >= MAX_RETRIES {
                     error!(
-                        "Max retries reached. Still have 'rest' condition. Body: {}",
-                        current_http_body_str
+                        "Max retries reached. Still have 'rest' condition. Body: {current_http_body_str}"
                     );
                     break Err(anyhow!(
                         "Max retries reached for {}. Still requires rest.",
@@ -123,13 +120,11 @@ pub async fn psn_dos_push(
         } else {
             // HTTP 状态码表示失败
             error!(
-                "HTTP request to {} failed with status: {}. Body: {}",
-                mss_info_config.app_url, current_status, current_http_body_str
+                "HTTP request to {} failed with status: {current_status}. Body: {current_http_body_str}",
+                mss_info_config.app_url
             );
             break Err(anyhow!(
-                "HTTP request failed with status: {}. Body: {}",
-                current_status,
-                current_http_body_str
+                "HTTP request failed with status: {current_status}. Body: {current_http_body_str}"
             ));
         }
     };
@@ -167,11 +162,11 @@ pub async fn psn_dos_push(
         }
         Err(e) => {
             // 请求失败，记录失败信息
-            let error_message = format!("ERROR: {:?}", e); // 捕获并格式化错误
+            let error_message = format!("ERROR: {e:?}"); // 捕获并格式化错误
 
             let record_reply_error = RecordMssReply {
                 id: Uuid::new_v4().to_string().replace("-", ""),
-                datas: format!("sendDATA:{}", request_json_data), // 记录发送的数据
+                datas: format!("sendDATA:{request_json_data}"), // 记录发送的数据
                 send_time: current_time,
                 msg: error_message, // 记录错误消息
             };
@@ -199,10 +194,7 @@ fn have_rest(http_body: &str) -> bool {
         Ok(val) => val,
         Err(e) => {
             // 如果解析失败，说明不是有效的 JSON，则不认为需要“休息”
-            warn!(
-                "Failed to parse http_body as JSON in have_rest: {:?}. Body: '{}'",
-                e, http_body
-            );
+            warn!("Failed to parse http_body as JSON in have_rest: {e:?}. Body: '{http_body}'");
             return false;
         }
     };
