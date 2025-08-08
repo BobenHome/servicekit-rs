@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use chrono::Utc; // 用于获取当前毫秒时间戳
+use chrono::Utc;
 use reqwest::Client;
 use tracing::{error, info};
-use uuid::Uuid; // 用于生成 UUID
+use uuid::Uuid;
 
 use crate::config::TelecomConfig;
 
@@ -12,19 +12,19 @@ use crate::config::TelecomConfig;
 use super::gateway_types::{
     Destination, MessageHeader, ServiceMessage, ServiceMessageBody, ServiceMessageReplyBuffer,
 };
-use serde_json::Value; // 用于 payload
+use serde_json::Value;
 
 /// 网关客户端，封装了与电信服务网关的 HTTP 通信。
 pub struct GatewayClient {
-    pub client: Client,
-    pub config: Arc<TelecomConfig>,
+    pub http_client: Client,
+    pub telecom_config: Arc<TelecomConfig>,
 }
 
 impl GatewayClient {
-    pub fn new(telecom_config: Arc<TelecomConfig>) -> Self {
+    pub fn new(http_client: Client, telecom_config: Arc<TelecomConfig>) -> Self {
         GatewayClient {
-            client: Client::new(),
-            config: telecom_config,
+            http_client,
+            telecom_config,
         }
     }
 
@@ -42,16 +42,16 @@ impl GatewayClient {
         let timestamp = Utc::now().timestamp_millis(); // 获取当前毫秒时间戳
 
         let destination = Destination {
-            source: self.config.source_app_id,
-            target: self.config.target_app_id,
+            source: self.telecom_config.source_app_id,
+            target: self.telecom_config.target_app_id,
             service: service_name.to_string(),
-            mode: self.config.mode,
-            is_sync: self.config.is_sync,
+            mode: self.telecom_config.mode,
+            is_sync: self.telecom_config.is_sync,
         };
 
         let header = MessageHeader {
             message_id,
-            op_code: 1, // 对应 Java 中的 OPCode.send
+            op_code: 1,
             timestamp,
             destination,
         };
@@ -63,18 +63,18 @@ impl GatewayClient {
         let service_message = ServiceMessage { header, body };
         info!(
             "Sending ServiceMessage to gateway: {}. Service: {}. ServiceMessage: {:?}",
-            self.config.gateway_url, service_name, service_message
+            self.telecom_config.gateway_url, service_name, service_message
         );
 
         let response = self
-            .client
-            .post(&self.config.gateway_url) // 发送 POST 请求到网关 URL
+            .http_client
+            .post(&self.telecom_config.gateway_url) // 发送 POST 请求到网关 URL
             .json(&service_message) // 自动将 `service_message` 序列化为 JSON 并设置 Content-Type: application/json
             .send()
             .await
             .context(format!(
                 "Failed to send HTTP request to gateway at {}",
-                self.config.gateway_url
+                self.telecom_config.gateway_url
             ))?;
 
         let status = response.status();

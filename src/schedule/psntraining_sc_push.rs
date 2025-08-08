@@ -49,19 +49,12 @@ impl PsnDataWrapper for PsnTrainingScPushTask {
 
 impl PsnTrainingScPushTask {
     pub fn new(
-        context: Arc<AppContext>,
+        app_context: Arc<AppContext>,
         hit_date: Option<String>,
         train_ids: Option<Vec<String>>,
     ) -> Self {
         PsnTrainingScPushTask {
-            base: BasePsnPushTask::new(
-                context.pool.clone(),
-                Arc::clone(&context.mss_info_config),
-                Arc::clone(&context.gateway_client),
-                Arc::clone(&context.clickhouse_client),
-                hit_date,
-                train_ids,
-            ),
+            base: BasePsnPushTask::new(app_context, hit_date, train_ids),
         }
     }
 }

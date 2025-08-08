@@ -80,19 +80,18 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
     let psn_data_kind = W::get_psn_data_kind_for_wrapper(); // 获取当前任务处理的数据类型种类
     let task_display_name = psn_data_kind.to_task_display_name(); // 获取任务名称
     info!(
-        "Running {} via execute_push_task_logic at: {}",
-        task_display_name,
+        "Running {task_display_name} via execute_push_task_logic at: {}",
         Local::now().format("%Y-%m-%d %H:%M:%S")
     );
 
-    let query_type = if let Some(date_str) = base_task.hit_date.clone() {
+    let query_type = if let Some(date_str) = &base_task.hit_date {
         // <--- 克隆 String 以便 QueryType 拥有
         info!("Processing data for specific date: {date_str}");
-        QueryType::ByDate(date_str) // <--- 传递拥有所有权的 String
-    } else if let Some(ids) = base_task.train_ids.clone() {
+        QueryType::ByDate(date_str.clone()) // 避免了对整个 Option 的克隆
+    } else if let Some(ids) = &base_task.train_ids {
         // <--- 克隆 Vec<String> 以便 QueryType 拥有
         info!("Processing data for specific IDs: {ids:?}");
-        QueryType::ByIds(ids) // <--- 传递拥有所有权的 Vec<String>
+        QueryType::ByIds(ids.clone()) // <--- 传递拥有所有权的 Vec<String>
     } else {
         // 如果没有提供 train_ids 和 hit_date，则回退到计算“昨天”的日期
         let today = Local::now().date_naive();

@@ -1,5 +1,6 @@
 // 请根据您 Cargo.toml 中的 `name` 字段来替换 `servicekit`
 use anyhow::{Context, Result};
+use reqwest::Client;
 use serde_json::json;
 use servicekit::{logging::LocalTimer, utils::gateway_client::GatewayClient, AppConfig};
 
@@ -38,7 +39,7 @@ async fn test_invoke_gateway_service_real_success() -> Result<()> {
     // 2. 加载应用程序配置
     let app_config = AppConfig::new().context("Failed to load application configuration")?;
     let app_config_arc = Arc::new(app_config);
-    let client = GatewayClient::new(Arc::clone(&app_config_arc.telecom_config));
+    let client = GatewayClient::new(Client::new(), Arc::clone(&app_config_arc.telecom_config));
     // 3. 准备测试用的 payload 数据
     let test_payload = vec![json!({"111111": 1})];
     // 4. 调用您要测试的方法。它现在会向真实的网关发送请求

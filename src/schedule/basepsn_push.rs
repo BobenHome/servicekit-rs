@@ -1,17 +1,17 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::config::MssInfoConfig;
 use crate::mappers::archiving_mss_mapper::ArchivingMssMapper;
 use crate::parsers::push_result_parser::PushResultParser;
 use crate::utils::{ClickHouseClient, GatewayClient};
+use crate::AppContext;
 use reqwest::Client;
 use sqlx::MySqlPool;
 
 // 封装所有任务共享的字段
 pub struct BasePsnPushTask {
     pub pool: MySqlPool,
-    pub http_client: Client, // 更改为 pub，方便从外部访问，如果需要
+    pub http_client: Client,
     pub mss_info_config: Arc<MssInfoConfig>,
     pub archiving_mapper: ArchivingMssMapper,
     pub push_result_parser: PushResultParser,
@@ -23,33 +23,22 @@ pub struct BasePsnPushTask {
 
 impl BasePsnPushTask {
     pub fn new(
-        pool: MySqlPool,
-        mss_info_config: Arc<MssInfoConfig>,
-        gateway_client: Arc<GatewayClient>,
-        clickhouse_client: Arc<ClickHouseClient>,
+        app_context: Arc<AppContext>,
         hit_date: Option<String>,
         train_ids: Option<Vec<String>>,
     ) -> Self {
         // MySqlPool 是 Arc 包装的，所以可以安全克隆
-        let pool_clone_for_mapper = pool.clone();
-        let pool_clone_for_parser = pool.clone();
-
-        // 自定义 HTTP 客户端，设置超时
-        let http_client = Client::builder()
-            .connect_timeout(Duration::from_secs(5)) // TCP连接最多等5秒
-            .read_timeout(Duration::from_secs(5)) // 读取响应最多等5秒
-            .timeout(Duration::from_secs(10)) // 整个请求最多10秒
-            .build()
-            .expect("Failed to build reqwest client");
+        let pool_clone_for_mapper = app_context.pool.clone();
+        let pool_clone_for_parser = app_context.pool.clone();
 
         BasePsnPushTask {
-            http_client,
-            mss_info_config,
+            pool: app_context.pool.clone(),
+            http_client: app_context.http_client.clone(),
+            mss_info_config: Arc::clone(&app_context.mss_info_config),
             archiving_mapper: ArchivingMssMapper::new(pool_clone_for_mapper),
             push_result_parser: PushResultParser::new(pool_clone_for_parser),
-            pool,
-            gateway_client,
-            clickhouse_client,
+            gateway_client: Arc::clone(&app_context.gateway_client),
+            clickhouse_client: Arc::clone(&app_context.clickhouse_client),
             hit_date,
             train_ids,
         }
