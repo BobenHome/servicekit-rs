@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::config::{MssInfoConfig, TelecomConfig};
+use crate::db::mysql_pool;
 use crate::utils::{ClickHouseClient, GatewayClient};
 use crate::ClickhouseConfig;
 use anyhow::{Context as _, Result};
@@ -19,12 +20,18 @@ pub struct AppContext {
 }
 
 impl AppContext {
-    pub fn new(
-        mysql_pool: MySqlPool,
+    pub async fn new(
+        database_url: &str,
         mss_info_config: Arc<MssInfoConfig>,
         telecom_config: Arc<TelecomConfig>,
         clickhouse_config: Arc<ClickhouseConfig>,
-    ) -> Result<Arc<Self>> {
+    ) -> Result<Self> {
+        // --- Initialize MYSQL POOL ---
+        let mysql_pool = mysql_pool::create_mysql_pool(database_url)
+            .await
+            .context("Failed to create database connection mysql_pool")?;
+        info!("Database connection mysql_pool created.");
+
         // --- Initialize HTTP ---
         // 自定义 HTTP 客户端，设置超时
         let http_client = Client::builder()
@@ -46,12 +53,12 @@ impl AppContext {
         );
         info!("ClickHouseClient initialized.");
 
-        Ok(Arc::new(Self {
+        Ok(Self {
             mysql_pool,
             http_client,
             mss_info_config,
             gateway_client,
             clickhouse_client,
-        }))
+        })
     }
 }

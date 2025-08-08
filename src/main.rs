@@ -1,10 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::Local;
-use tracing::{error, info};
-
 use servicekit::{
     config::AppConfig,
-    db::mysql_pool,
     logging,
     schedule::{
         CompositeTask, PsnArchivePushTask, PsnArchiveScPushTask, PsnLecturerPushTask,
@@ -15,6 +12,7 @@ use servicekit::{
 }; //servicekit是crate 名称（在 Cargo.toml 中定义），代表了库。db::mysql_pool, schedule::PsntrainPushTask, WebServer 这些都是从 lib.rs 中 pub use 或 pub mod 导出的项。如果 lib.rs 不存在或者没有正确地导出这些模块，main.rs 将无法直接通过 servicekit:: 路径来访问它们
 use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler};
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -26,78 +24,76 @@ async fn main() -> Result<()> {
     // 2. 加载应用程序配置
     let app_config = AppConfig::new().context("Failed to load application configuration")?;
     info!("Application configuration loaded successfully: {app_config:?}");
-    // 将 app_config 包装成 Arc，因为后续多个地方会共享它
-    let app_config_arc = Arc::new(app_config); // <--- 在这里创建 Arc<AppConfig>
 
-    // 3. 创建数据库连接池 (使用配置中的 database_url)
-    let mysql_pool = mysql_pool::create_mysql_pool(&app_config_arc.database_url) // <--- 使用 app_config_arc.database_url
-        .await
-        .context("Failed to create database connection mysql_pool")?;
-    info!("Database connection mysql_pool created.");
-
-    // 4. 初始化任务调度器
+    // 3. 初始化任务调度器
     // --- 使用 tokio-cron-scheduler 启动调度器 ---
     let scheduler = JobScheduler::new()
         .await
         .context("Failed to create scheduler")?;
     info!("Scheduler initialized.");
 
-    // 5. 创建AppContext实例
+    // 4. 创建AppContext实例
     let app_context = AppContext::new(
-        mysql_pool,
-        Arc::clone(&app_config_arc.mss_info_config),
-        Arc::clone(&app_config_arc.telecom_config),
-        Arc::clone(&app_config_arc.clickhouse_config),
-    )?;
+        &app_config.database_url,
+        Arc::clone(&app_config.mss_info_config),
+        Arc::clone(&app_config.telecom_config),
+        Arc::clone(&app_config.clickhouse_config),
+    )
+    .await?;
+    let app_context_arc = Arc::new(app_context);
 
-    // 6. 创建 PsnTrainPushTask 实例
-    let push_train_task = Arc::new(PsnTrainPushTask::new(Arc::clone(&app_context), None, None));
+    // 5. 创建 PsnTrainPushTask 实例
+    let push_train_task = Arc::new(PsnTrainPushTask::new(
+        Arc::clone(&app_context_arc),
+        None,
+        None,
+    ));
 
-    // 7. 创建 PsnLecturerPushTask 实例
+    // 6. 创建 PsnLecturerPushTask 实例
     let push_lecturer_task = Arc::new(PsnLecturerPushTask::new(
-        Arc::clone(&app_context),
+        Arc::clone(&app_context_arc),
         None,
         None,
     ));
 
-    // 8. 创建 PsnTrainingPushTask 实例
+    // 7. 创建 PsnTrainingPushTask 实例
     let push_training_task = Arc::new(PsnTrainingPushTask::new(
-        Arc::clone(&app_context),
+        Arc::clone(&app_context_arc),
         None,
         None,
     ));
 
-    // 9. 创建 PsnArchivePushTask 实例
+    // 8. 创建 PsnArchivePushTask 实例
     let push_archive_task = Arc::new(PsnArchivePushTask::new(
-        Arc::clone(&app_context),
+        Arc::clone(&app_context_arc),
         None,
         None,
     ));
 
-    // 10. 创建 PsnTrainScPushTask 实例
+    // 9. 创建 PsnTrainScPushTask 实例
     let push_train_sc_task = Arc::new(PsnTrainScPushTask::new(
-        Arc::clone(&app_context),
+        Arc::clone(&app_context_arc),
         None,
         None,
     ));
 
-    // 11. 创建 PsnLecturerScPushTask 实例
+    // 10. 创建 PsnLecturerScPushTask 实例
     let push_lecturer_sc_task = Arc::new(PsnLecturerScPushTask::new(
-        Arc::clone(&app_context),
+        Arc::clone(&app_context_arc),
         None,
         None,
     ));
 
-    // 12. 创建 PsnTrainingScPushTask 实例
+    // 11. 创建 PsnTrainingScPushTask 实例
     let push_training_sc_task = Arc::new(PsnTrainingScPushTask::new(
-        Arc::clone(&app_context),
+        Arc::clone(&app_context_arc),
         None,
         None,
     ));
 
-    // 13. 创建 PsnArchiveScPushTask 实例
+    // 12. 创建 PsnArchiveScPushTask 实例
     let push_archive_sc_task = Arc::new(PsnArchiveScPushTask::new(
-        Arc::clone(&app_context),
+        Arc::clone(&app_context_arc),
         None,
         None,
     ));
@@ -119,18 +115,17 @@ async fn main() -> Result<()> {
         "培训班数据归档到MSS定时任务".to_string(),
     ));
 
-    // 14. 使用辅助函数创建并添加 CompositeTask 的 Cron Job
+    // 13. 使用辅助函数创建并添加 CompositeTask 的 Cron Job
     create_and_schedule_task_job(
         &scheduler,
         main_scheduled_composite_task, // Arc<CompositeTask> 会自动转换为 Arc<dyn TaskExecutor>
-        app_config_arc.tasks.psn_push.cron_schedule.as_str(),
+        app_config.tasks.psn_push.cron_schedule.as_str(),
         vec![], // 作为依赖任务传入
     )
     .await?;
 
-    // 15. 在后台启动调度器，这样它就不会阻塞 Web 服务器的启动
+    // 14. 在后台启动调度器，这样它就不会阻塞 Web 服务器的启动
     tokio::spawn(async move {
-        info!("Attempting to start scheduler in background...");
         // 显式处理 scheduler.start().await 的 Result
         if let Err(e) = scheduler.start().await {
             error!("Failed to start scheduler in background: {e:?}");
@@ -140,8 +135,8 @@ async fn main() -> Result<()> {
         }
     });
 
-    // 16.启动 Web 服务器
-    let server = WebServer::new(app_config_arc.web_server_port, Arc::clone(&app_context));
+    // 15.启动 Web 服务器
+    let server = WebServer::new(app_config.web_server_port, Arc::clone(&app_context_arc));
     server.start().await.context("Failed to start web server")?;
 
     info!("Application shut down cleanly.");
