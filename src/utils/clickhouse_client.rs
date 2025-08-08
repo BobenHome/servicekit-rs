@@ -25,9 +25,9 @@ impl ClickHouseClient {
                     port = port,
                     db = config.database,
                 );
-                info!("Initializing ClickHouse client for: {}", url);
-                let pool = Pool::new(url);
-                clients.push((format!("{host}:{port}"), Arc::new(pool)));
+                info!("Initializing ClickHouse client for: {url}");
+                let ck_pool = Pool::new(url);
+                clients.push((format!("{host}:{port}"), Arc::new(ck_pool)));
             }
         }
 
@@ -42,8 +42,8 @@ impl ClickHouseClient {
     pub async fn execute_on_all_nodes(&self, sql: &str) {
         let mut all_success = true;
 
-        for (addr, pool) in &self.clients {
-            match pool.get_handle().await {
+        for (addr, ck_pool) in &self.clients {
+            match ck_pool.get_handle().await {
                 Ok(mut client) => {
                     info!("Executing query on ClickHouse node: {addr}");
                     if let Err(e) = client.execute(sql).await {

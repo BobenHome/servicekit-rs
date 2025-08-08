@@ -22,12 +22,12 @@ pub struct MssPushResultDetail {
 }
 
 pub struct PushResultService {
-    pool: MySqlPool,
+    mysql_pool: MySqlPool,
 }
 
 impl PushResultService {
-    pub fn new(pool: MySqlPool) -> Self {
-        PushResultService { pool }
+    pub fn new(mysql_pool: MySqlPool) -> Self {
+        PushResultService { mysql_pool }
     }
 
     pub async fn record(
@@ -50,7 +50,7 @@ impl PushResultService {
             mss_push_result.error_msg,
             mss_push_result.error_code,
         )
-        .execute(&self.pool)
+        .execute(&self.mysql_pool)
         .await
         .context("Failed to insert into mss_push_result table")?;
 
@@ -64,7 +64,7 @@ impl PushResultService {
                 detail.data_id,
                 detail.result_id,
             )
-            .execute(&self.pool)
+            .execute(&self.mysql_pool)
             .await
             .context("Failed to insert into mss_push_result_detail table")?;
         }

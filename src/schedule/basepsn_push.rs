@@ -10,7 +10,7 @@ use sqlx::MySqlPool;
 
 // 封装所有任务共享的字段
 pub struct BasePsnPushTask {
-    pub pool: MySqlPool,
+    pub mysql_pool: MySqlPool,
     pub http_client: Client,
     pub mss_info_config: Arc<MssInfoConfig>,
     pub archiving_mapper: ArchivingMssMapper,
@@ -28,11 +28,11 @@ impl BasePsnPushTask {
         train_ids: Option<Vec<String>>,
     ) -> Self {
         // MySqlPool 是 Arc 包装的，所以可以安全克隆
-        let pool_clone_for_mapper = app_context.pool.clone();
-        let pool_clone_for_parser = app_context.pool.clone();
+        let pool_clone_for_mapper = app_context.mysql_pool.clone();
+        let pool_clone_for_parser = app_context.mysql_pool.clone();
 
         BasePsnPushTask {
-            pool: app_context.pool.clone(),
+            mysql_pool: app_context.mysql_pool.clone(),
             http_client: app_context.http_client.clone(),
             mss_info_config: Arc::clone(&app_context.mss_info_config),
             archiving_mapper: ArchivingMssMapper::new(pool_clone_for_mapper),

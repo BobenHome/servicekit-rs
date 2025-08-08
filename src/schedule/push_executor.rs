@@ -103,7 +103,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
 
     let datas = W::get_query_builder(query_type)
         .build_query_as::<W::DataType>()
-        .fetch_all(&base_task.pool)
+        .fetch_all(&base_task.mysql_pool)
         .await
         .context(format!(
             "Failed to fetch {task_display_name} data from database"
@@ -252,7 +252,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
 
             for chunk in success_items.chunks(BATCH_SIZE) {
                 update_notify_mss_mysql(
-                    &base_task.pool,
+                    &base_task.mysql_pool,
                     mysql_table,
                     mysql_id_column,
                     "1",
@@ -268,7 +268,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
             // failed_ids 已经是 Vec<(String, Option<String>)>，可以直接使用
             for chunk in failed_ids.chunks(BATCH_SIZE) {
                 update_notify_mss_mysql(
-                    &base_task.pool,
+                    &base_task.mysql_pool,
                     mysql_table,
                     mysql_id_column,
                     "2",
@@ -291,7 +291,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
 /// `items` 参数是 `(ID, Option<Message>)` 的元组列表。
 /// `update_message_field` 参数指示是否应更新 `trainNotifyMssMessage` 字段。
 pub async fn update_notify_mss_mysql(
-    pool: &MySqlPool,
+    mysql_pool: &MySqlPool,
     table_name: &str,
     id_column: &str,
     status: &str,
@@ -351,7 +351,7 @@ pub async fn update_notify_mss_mysql(
     // 打印构建的 SQL 语句和绑定参数，便于调试验证
     info!("Built MySQL update query: {}", query.sql());
 
-    match query.execute(pool).await {
+    match query.execute(mysql_pool).await {
         Ok(result) => {
             info!(
                 "MySQL update for table '{table_name}' completed. Rows affected: {}",

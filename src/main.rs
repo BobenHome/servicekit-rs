@@ -1,14 +1,18 @@
 use anyhow::{Context, Result};
 use chrono::Local;
 use tracing::{error, info};
-//servicekit是crate 名称（在 Cargo.toml 中定义），代表了库。db::pool, schedule::PsntrainPushTask, WebServer 这些都是从 lib.rs 中 pub use 或 pub mod 导出的项。如果 lib.rs 不存在或者没有正确地导出这些模块，main.rs 将无法直接通过 servicekit:: 路径来访问它们
-use servicekit::config::AppConfig;
-use servicekit::schedule::{
-    CompositeTask, PsnArchivePushTask, PsnArchiveScPushTask, PsnLecturerPushTask,
-    PsnLecturerScPushTask, PsnTrainScPushTask, PsnTrainingPushTask, PsnTrainingScPushTask,
-};
-use servicekit::{db::pool, schedule::PsnTrainPushTask, WebServer};
-use servicekit::{logging, AppContext, TaskExecutor};
+
+use servicekit::{
+    config::AppConfig,
+    db::mysql_pool,
+    logging,
+    schedule::{
+        CompositeTask, PsnArchivePushTask, PsnArchiveScPushTask, PsnLecturerPushTask,
+        PsnLecturerScPushTask, PsnTrainPushTask, PsnTrainScPushTask, PsnTrainingPushTask,
+        PsnTrainingScPushTask,
+    },
+    AppContext, TaskExecutor, WebServer,
+}; //servicekit是crate 名称（在 Cargo.toml 中定义），代表了库。db::mysql_pool, schedule::PsntrainPushTask, WebServer 这些都是从 lib.rs 中 pub use 或 pub mod 导出的项。如果 lib.rs 不存在或者没有正确地导出这些模块，main.rs 将无法直接通过 servicekit:: 路径来访问它们
 use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler};
 
@@ -26,10 +30,10 @@ async fn main() -> Result<()> {
     let app_config_arc = Arc::new(app_config); // <--- 在这里创建 Arc<AppConfig>
 
     // 3. 创建数据库连接池 (使用配置中的 database_url)
-    let pool = pool::create_pool(&app_config_arc.database_url) // <--- 使用 app_config_arc.database_url
+    let mysql_pool = mysql_pool::create_mysql_pool(&app_config_arc.database_url) // <--- 使用 app_config_arc.database_url
         .await
-        .context("Failed to create database connection pool")?;
-    info!("Database connection pool created.");
+        .context("Failed to create database connection mysql_pool")?;
+    info!("Database connection mysql_pool created.");
 
     // 4. 初始化任务调度器
     // --- 使用 tokio-cron-scheduler 启动调度器 ---
@@ -40,7 +44,7 @@ async fn main() -> Result<()> {
 
     // 5. 创建AppContext实例
     let app_context = AppContext::new(
-        pool,
+        mysql_pool,
         Arc::clone(&app_config_arc.mss_info_config),
         Arc::clone(&app_config_arc.telecom_config),
         Arc::clone(&app_config_arc.clickhouse_config),

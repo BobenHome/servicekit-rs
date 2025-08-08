@@ -13,12 +13,12 @@ pub struct RecordMssReply {
 
 // 模拟数据库 mapper
 pub struct ArchivingMssMapper {
-    pool: MySqlPool, // ArchivingMssMapper 现在持有数据库连接池
+    mysql_pool: MySqlPool, // ArchivingMssMapper 现在持有数据库连接池
 }
 
 impl ArchivingMssMapper {
-    pub fn new(pool: MySqlPool) -> Self {
-        ArchivingMssMapper { pool }
+    pub fn new(mysql_pool: MySqlPool) -> Self {
+        ArchivingMssMapper { mysql_pool }
     }
 
     pub async fn record_mss_reply(&self, reply: &RecordMssReply) -> Result<()> {
@@ -35,7 +35,7 @@ impl ArchivingMssMapper {
             reply.datas,
             reply.send_time
         )
-        .execute(&self.pool)
+        .execute(&self.mysql_pool)
         .await
         .context("Failed to insert RecordMssReply into data_archiving_mss_record")?;
 

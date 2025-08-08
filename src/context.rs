@@ -11,7 +11,7 @@ use tracing::info;
 
 #[derive(Clone)]
 pub struct AppContext {
-    pub pool: MySqlPool,
+    pub mysql_pool: MySqlPool,
     pub http_client: Client,
     pub mss_info_config: Arc<MssInfoConfig>,
     pub gateway_client: Arc<GatewayClient>,
@@ -20,7 +20,7 @@ pub struct AppContext {
 
 impl AppContext {
     pub fn new(
-        pool: MySqlPool,
+        mysql_pool: MySqlPool,
         mss_info_config: Arc<MssInfoConfig>,
         telecom_config: Arc<TelecomConfig>,
         clickhouse_config: Arc<ClickhouseConfig>,
@@ -47,7 +47,7 @@ impl AppContext {
         info!("ClickHouseClient initialized.");
 
         Ok(Arc::new(Self {
-            pool,
+            mysql_pool,
             http_client,
             mss_info_config,
             gateway_client,

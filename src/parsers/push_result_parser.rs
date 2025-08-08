@@ -27,9 +27,9 @@ pub struct PushResultParser {
 }
 
 impl PushResultParser {
-    pub fn new(pool: MySqlPool) -> Self {
+    pub fn new(mysql_pool: MySqlPool) -> Self {
         PushResultParser {
-            push_result_service: PushResultService::new(pool),
+            push_result_service: PushResultService::new(mysql_pool),
         }
     }
     pub async fn parse(&self, data: &str, result: &str) -> Result<(), String> {
