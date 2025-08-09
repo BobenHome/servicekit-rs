@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use chrono::Local;
-use reqwest::{Client, StatusCode};
+use reqwest::Client;
 use serde_json::{from_str, json, Value};
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -19,7 +19,6 @@ pub async fn psn_dos_push(
     push_result_parser: &PushResultParser, // 引用类型
     psn_data: &DynamicPsnData,             // 引用类型
 ) -> Result<()> {
-    let mut request_attempt = 0;
     const MAX_RETRIES: u32 = 5;
 
     let dynamic_key_name = psn_data.get_key_name();
@@ -33,82 +32,70 @@ pub async fn psn_dos_push(
     let request_json_data = serde_json::to_string(&request_json_data_value)
         .context("Failed to serialize dynamic JSON payload")?;
 
-    let mut final_http_body_str: String = String::new(); // 最终的响应体
-
     // 引入一个 Result 来封装循环体内的逻辑，以便统一错误处理
-    let result_of_send_loop: Result<(), anyhow::Error> = loop {
-        request_attempt += 1;
-        info!(
-            "Attempting to send data to {app_url} (Attempt {request_attempt}), key: {dynamic_key_name}"
-        );
-        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+    let result_of_send_loop: Result<String, anyhow::Error> = async {
+        for attempt in 1..=MAX_RETRIES {
+            info!(
+                "Attempting to send data to {app_url} (Attempt {attempt}), key: {dynamic_key_name}"
+            );
+            // 调用mss接口前先休眠20毫秒
+            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+            let request = http_client
+                .post(app_url)
+                .header("X-APP-ID", &mss_info_config.app_id)
+                .header("X-APP-KEY", &mss_info_config.app_key)
+                .header("Content-Type", "application/json")
+                .body(request_json_data.clone());
 
-        let request = http_client
-            .post(app_url)
-            .header("X-APP-ID", &mss_info_config.app_id)
-            .header("X-APP-KEY", &mss_info_config.app_key)
-            .header("Content-Type", "application/json")
-            .body(request_json_data.clone());
+            let response = match request.send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    // 发送请求失败 (网络不通, DNS 查找失败等)
+                    error!("Failed to send HTTP request to {app_url}: {e:?}");
+                    return Err(anyhow!("Failed to send HTTP request to {app_url}: {e:?}"));
+                },
+            };
 
-        let response_result = request.send().await;
+            let http_status = response.status();
+            let http_body_str = match response.text().await {
+                Ok(body) => body,
+                Err(e) => {
+                    error!("Failed to read response body for {app_url}: {e:?}"); 
+                    return Err(anyhow!("Failed to read response body for {app_url}: {e:?}"));
+                },
+            };
 
-        let current_http_body_str: String;
-        let current_status: StatusCode;
+            info!("Received response for {app_url} (Attempt {attempt}): Status={http_status}, Body={http_body_str}");
 
-        match response_result {
-            Ok(response) => {
-                current_status = response.status();
-                match response.text().await {
-                    Ok(body) => current_http_body_str = body,
-                    Err(e) => {
-                        error!("Failed to read response body for {app_url}: {e:?}");
-                        break Err(anyhow!("Failed to read response body for {app_url}: {e:?}"));
-                    }
+            if http_status.is_success() {
+                if have_rest(&http_body_str) {
+                    warn!("Response indicates 'rest' required. Retrying after 1 minute...");
+                    tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+                    continue; // 继续循环进行重试
+                } else {
+                    info!("Request to {app_url} successful and no 'rest' required.");
+                    return Ok(http_body_str); // 成功并退出重试循环
                 }
-            }
-            Err(e) => {
-                // 发送请求失败 (网络不通, DNS 查找失败等)
-                error!("Failed to send HTTP request to {app_url}: {e:?}");
-                break Err(anyhow!("Failed to send HTTP request to {app_url}: {e:?}"));
-            }
-        }
-
-        info!(
-            "Received response for {app_url} (Attempt {request_attempt}): Status={current_status}, Body={current_http_body_str}");
-
-        if current_status.is_success() {
-            if have_rest(&current_http_body_str) {
-                if request_attempt >= MAX_RETRIES {
-                    error!(
-                        "Max retries reached. Still have 'rest' condition. Body: {current_http_body_str}"
-                    );
-                    break Err(anyhow!(
-                        "Max retries reached for {app_url}. Still requires rest."
-                    ));
-                }
-                warn!("Response indicates 'rest' required. Retrying after 1 minute...");
-                tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-                continue; // 继续循环进行重试
             } else {
-                info!("Request to {app_url} successful and no 'rest' required.");
-                final_http_body_str = current_http_body_str; // 成功时赋值
-                break Ok(()); // 成功并退出重试循环
+                // HTTP 状态码表示失败
+                error!(
+                    "HTTP request to {app_url} failed with status: {http_status}. Body: {http_body_str}");
+                return  Err(anyhow!(
+                    "HTTP request failed with status: {http_status}. Body: {http_body_str}"
+                ));
             }
-        } else {
-            // HTTP 状态码表示失败
-            error!(
-                "HTTP request to {app_url} failed with status: {current_status}. Body: {current_http_body_str}");
-            break Err(anyhow!(
-                "HTTP request failed with status: {current_status}. Body: {current_http_body_str}"
-            ));
         }
-    };
+        Err(anyhow!(
+            "All {MAX_RETRIES} attempts failed for key {dynamic_key_name}"
+        ))
+    }
+    .await;
 
     // 统一的错误处理和记录逻辑
     let current_time = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
     let primary_result = match result_of_send_loop {
-        Ok(_) => {
+        Ok(http_body_str) => {
             // 请求成功，记录成功信息
             let record_reply = RecordMssReply {
                 id: Uuid::new_v4().to_string().replace("-", ""),
@@ -117,7 +104,7 @@ pub async fn psn_dos_push(
                     mss_info_config.app_id, mss_info_config.app_key, request_json_data
                 ),
                 send_time: current_time,
-                msg: final_http_body_str.clone(), // 成功时使用 final_http_body_str
+                msg: http_body_str.clone(),
             };
             // 尝试记录成功信息，如果记录失败，将记录的错误链到主结果上
             archiving_mapper
@@ -127,7 +114,7 @@ pub async fn psn_dos_push(
 
             // 只有成功时才调用 parser.parse
             let push_result = push_result_parser
-                .parse(&request_json_data, &final_http_body_str)
+                .parse(&request_json_data, &http_body_str)
                 .await;
             // 根据解析结果判断是否成功
             if let Err(msg) = push_result {

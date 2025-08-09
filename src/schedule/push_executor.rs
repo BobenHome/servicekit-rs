@@ -138,10 +138,8 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
                 failed_ids.push((current_id, None));
             }
         } else {
-            info!(
-                "Successfully sent data of type '{}' to third party. Task: {task_display_name}",
-                psn_data_enum.get_key_name()
-            );
+            let psn_data_enum_name = psn_data_enum.get_key_name();
+            info!("Successfully sent data of type '{psn_data_enum_name}' to third party. Task: {task_display_name}");
             success_ids.push(current_id);
             // 成功后调用小助手接口，写入归档成功的班级
             if let DynamicPsnData::Class(class_data) = psn_data_enum {
@@ -151,10 +149,7 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
                     .invoke_gateway_service("bj.bjglinfo.gettrainstatusbyid", payload)
                     .await;
             } else {
-                info!(
-                    "Skipping gateway service invocation for data of type '{}'. Only 'Class' data is processed by gateway.",
-                    psn_data_enum.get_key_name()
-                );
+                info!("Skipping gateway service invocation for data of type '{psn_data_enum_name}'. Only 'Class' data is processed by gateway.");
             }
         }
     }
