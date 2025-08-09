@@ -28,6 +28,8 @@ pub async fn psn_dos_push(
         dynamic_key_name: [psn_data]
     });
 
+    let app_url = &mss_info_config.app_url;
+
     let request_json_data = serde_json::to_string(&request_json_data_value)
         .context("Failed to serialize dynamic JSON payload")?;
 
@@ -37,19 +39,12 @@ pub async fn psn_dos_push(
     let result_of_send_loop: Result<(), anyhow::Error> = loop {
         request_attempt += 1;
         info!(
-            "Attempting to send data to {} (Attempt {request_attempt}), key: {dynamic_key_name}",
-            mss_info_config.app_url
+            "Attempting to send data to {app_url} (Attempt {request_attempt}), key: {dynamic_key_name}"
         );
-
-        if request_attempt > 1 {
-            info!("********Resting 1 minute before retry********");
-            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-        } else {
-            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
 
         let request = http_client
-            .post(&mss_info_config.app_url)
+            .post(app_url)
             .header("X-APP-ID", &mss_info_config.app_id)
             .header("X-APP-KEY", &mss_info_config.app_key)
             .header("Content-Type", "application/json")
@@ -66,35 +61,20 @@ pub async fn psn_dos_push(
                 match response.text().await {
                     Ok(body) => current_http_body_str = body,
                     Err(e) => {
-                        // 读取响应体失败
-                        error!(
-                            "Failed to read response body for {}: {e:?}",
-                            mss_info_config.app_url
-                        );
-                        break Err(anyhow!(
-                            "Failed to read response body for {}: {e:?}",
-                            mss_info_config.app_url
-                        ));
+                        error!("Failed to read response body for {app_url}: {e:?}");
+                        break Err(anyhow!("Failed to read response body for {app_url}: {e:?}"));
                     }
                 }
             }
             Err(e) => {
                 // 发送请求失败 (网络不通, DNS 查找失败等)
-                error!(
-                    "Failed to send HTTP request to {}: {e:?}",
-                    mss_info_config.app_url
-                );
-                break Err(anyhow!(
-                    "Failed to send HTTP request to {}: {e:?}",
-                    mss_info_config.app_url
-                ));
+                error!("Failed to send HTTP request to {app_url}: {e:?}");
+                break Err(anyhow!("Failed to send HTTP request to {app_url}: {e:?}"));
             }
         }
 
         info!(
-            "Received response for {} (Attempt {request_attempt}): Status={current_status}, Body={current_http_body_str}",
-            mss_info_config.app_url
-        );
+            "Received response for {app_url} (Attempt {request_attempt}): Status={current_status}, Body={current_http_body_str}");
 
         if current_status.is_success() {
             if have_rest(&current_http_body_str) {
@@ -103,26 +83,21 @@ pub async fn psn_dos_push(
                         "Max retries reached. Still have 'rest' condition. Body: {current_http_body_str}"
                     );
                     break Err(anyhow!(
-                        "Max retries reached for {}. Still requires rest.",
-                        mss_info_config.app_url
+                        "Max retries reached for {app_url}. Still requires rest."
                     ));
                 }
-                info!("Response indicates 'rest' required. Retrying...");
+                warn!("Response indicates 'rest' required. Retrying after 1 minute...");
+                tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
                 continue; // 继续循环进行重试
             } else {
-                info!(
-                    "Request to {} successful and no 'rest' required.",
-                    mss_info_config.app_url
-                );
+                info!("Request to {app_url} successful and no 'rest' required.");
                 final_http_body_str = current_http_body_str; // 成功时赋值
                 break Ok(()); // 成功并退出重试循环
             }
         } else {
             // HTTP 状态码表示失败
             error!(
-                "HTTP request to {} failed with status: {current_status}. Body: {current_http_body_str}",
-                mss_info_config.app_url
-            );
+                "HTTP request to {app_url} failed with status: {current_status}. Body: {current_http_body_str}");
             break Err(anyhow!(
                 "HTTP request failed with status: {current_status}. Body: {current_http_body_str}"
             ));
@@ -175,7 +150,8 @@ pub async fn psn_dos_push(
                 .record_mss_reply(&record_reply_error)
                 .await
                 .context("Failed to record FAILED MSS reply")?; // 使用 ? 传播数据库写入错误
-                                                                // 返回原始的失败结果，以便 execute 方法能知道发生了错误
+
+            // 返回原始的失败结果，以便 execute 方法能知道发生了错误
             Err(e)
         }
     };
