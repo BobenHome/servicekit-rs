@@ -1,7 +1,7 @@
-mod server;
 mod handlers;
 mod models;
+mod server;
 
-pub use server::WebServer;
 pub use handlers::*;
 pub use models::*;
+pub use server::WebServer;
