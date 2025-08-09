@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{Datelike, Local};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::{
     fs::{self, File, OpenOptions},
     io::{self},
@@ -39,7 +40,7 @@ impl io::Write for LogFileWriter {
 /// 实现 `MakeWriter` 特性，用于自定义文件写入和轮转逻辑。
 struct LocalTimeRollingWriter {
     active_file: Arc<Mutex<File>>,
-    last_rotation_day: Mutex<u32>, // 存储上次轮转发生的日期（天数）
+    last_rotation_day: AtomicU32, // 存储上次轮转发生的日期（天数）
     log_dir: PathBuf,
     // current_log_file_name: Mutex<String>, // 可以考虑存储当前文件名，但我们通过 current_day 来判断更简洁
 }
@@ -51,7 +52,6 @@ impl LocalTimeRollingWriter {
             .context(format!("Failed to create log directory: {log_path:?}"))?;
 
         let now = Local::now();
-        let current_day = now.day(); // 依赖 Datelike
 
         // 在初始化时，我们仍然尝试直接打开 app.log
         // 确保 initial_file 的路径是 `app.log`
@@ -69,7 +69,7 @@ impl LocalTimeRollingWriter {
 
         Ok(LocalTimeRollingWriter {
             active_file: Arc::new(Mutex::new(file)),
-            last_rotation_day: Mutex::new(current_day),
+            last_rotation_day: AtomicU32::new(now.day()),
             log_dir: log_path,
         })
     }
@@ -95,9 +95,8 @@ impl LocalTimeRollingWriter {
             if modified_date < today_date {
                 let archive_path = Self::get_archive_log_path(log_dir, &modified_date);
                 println!(
-                    "INFO: Archiving old app.log from {} to {:?}",
-                    modified_date.format("%Y-%m-%d"),
-                    archive_path
+                    "INFO: Archiving old app.log from {} to {archive_path:?}",
+                    modified_date.format("%Y-%m-%d")
                 );
                 fs::rename(&app_log_path, &archive_path).context(format!(
                     "Failed to rename old app.log from {app_log_path:?} to {archive_path:?}"
@@ -116,45 +115,38 @@ impl LocalTimeRollingWriter {
     // 处理轮转逻辑。
     // 如果打开新文件失败，它会记录错误，但不会替换当前的 active_file。
     // 这意味着日志将继续写入到旧文件中。
-    fn ensure_current_file_is_correct(&self) -> Result<()> {
+    fn rotate_log_file(&self) -> Result<()> {
         let now = Local::now();
         let today = now.day();
 
-        let mut last_rotation_day_guard = self.last_rotation_day.lock().unwrap();
-
-        // 每日轮转逻辑
-        if *last_rotation_day_guard != today {
-            println!(
-                "INFO: Daily log rotation triggered. Old day: {}, New day: {}",
-                *last_rotation_day_guard, today
-            );
-            *last_rotation_day_guard = today; // 更新记录的日期
-
-            // 在打开新的 app.log 之前，先归档旧的 app.log (如果需要)
-            // 这里传递 `now` 的日期部分，以确保归档文件名为今天的日期
-            Self::archive_old_app_log_if_needed(&self.log_dir, &now)?;
-
-            let new_file_path = self.log_dir.join("app.log"); // 新文件始终是 app.log
-
-            match OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&new_file_path)
-            {
-                Ok(new_file) => {
-                    // 仅在此处锁定 active_file_guard 以替换 File
-                    let mut active_file_guard = self.active_file.lock().unwrap();
-                    *active_file_guard = new_file; // 替换 Mutex 内部的 File
-                    println!("INFO: New log file opened: {new_file_path:?}");
-                }
-                Err(e) => {
-                    eprintln!("ERROR: Failed to open new daily log file {new_file_path:#?}: {e:?}");
-                    // 如果打开新文件失败，不替换旧文件。
-                    // 日志将继续写入到上一天的文件。
-                }
-            }
+        // 使用无锁的原子操作来读取日期，避免长时间锁定
+        // Ordering::Relaxed 在这里是安全的，因为我们不需要同步其他内存操作
+        if self.last_rotation_day.load(Ordering::Relaxed) == today {
+            return Ok(()); // 日期未变，直接返回
         }
-        Ok(()) // 始终返回 Ok，因为错误已在内部处理
+        // 日期已变更，执行轮转逻辑
+        println!("INFO: Daily log rotation triggered for day: {}", today);
+
+        // 归档旧文件
+        Self::archive_old_app_log_if_needed(&self.log_dir, &now)?;
+
+        let new_file_path = self.log_dir.join("app.log");
+        // 打开新文件，新文件始终是 app.log，如果失败，`?` 会将错误向上传播
+        let new_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&new_file_path)
+            .context(format!(
+                "Failed to open new daily log file {new_file_path:?}"
+            ))?;
+
+        // 仅在所有操作成功后，才更新 active_file 和 last_rotation_day
+        *self.active_file.lock().unwrap() = new_file;
+        self.last_rotation_day.store(today, Ordering::Relaxed);
+
+        println!("INFO: New log file opened: {new_file_path:?}");
+
+        Ok(())
     }
 }
 
@@ -166,8 +158,11 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LocalTimeRollingWriter {
         // 确保正确的文件已打开并处于活动状态。
         // 此函数现在在内部处理自己的错误，并通过打印来确保 `active_file` 始终持有有效的 `File`
         //（要么是旧文件，要么是新打开的文件）。
-        let _ = self.ensure_current_file_is_correct(); // 调用并忽略 Result，因为错误已在内部处理
-
+        if let Err(e) = self.rotate_log_file() {
+            // 如果轮转失败，打印错误到 stderr（作为最后的日志记录手段）。
+            // 应用程序将继续向旧的日志文件写入，保证日志不中断。
+            eprintln!("[Log Rotation Error] Failed to rotate log file, logging will continue on the old file. Error: {e:?}");
+        }
         // 始终返回一个指向当前活动文件的 LogFileWriter。
         // 如果 ensure_current_file_is_correct 未能打开新文件，
         // 这仍将返回一个指向旧文件的写入器。
