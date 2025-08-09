@@ -10,7 +10,7 @@ use crate::{
     AppContext, TaskExecutor,
 };
 use actix_web::{post, web, HttpResponse, Result};
-use chrono::{Duration, NaiveDate};
+use chrono::NaiveDate;
 use tracing::{error, info, warn};
 
 #[post("/pxb/pushMss")]
@@ -160,72 +160,69 @@ async fn process_push_tasks(
 fn parse_date_range_strings(
     begin_date_str: &str,
     end_date_str: &str,
-) -> std::result::Result<Vec<String>, String> {
-    let mut dates_to_process = Vec::new();
-    // 尝试解析为标准日期
-    let parse_result_begin = NaiveDate::parse_from_str(begin_date_str, "%Y-%m-%d");
-    let parse_result_end = NaiveDate::parse_from_str(end_date_str, "%Y-%m-%d");
-
-    if parse_result_begin.is_ok() && parse_result_end.is_ok() {
+) -> anyhow::Result<Vec<String>, String> {
+    // 将整个 if-else 块作为表达式，直接返回其结果
+    if let (Ok(current_date), Ok(end_date)) = (
+        NaiveDate::parse_from_str(begin_date_str, "%Y-%m-%d"),
+        NaiveDate::parse_from_str(end_date_str, "%Y-%m-%d"),
+    ) {
         // 情况 A: 均为标准有效日期
-        let mut current_date = parse_result_begin.unwrap();
-        let end_date = parse_result_end.unwrap();
-
         if current_date > end_date {
             return Err(format!(
                 "起始日期 {begin_date_str} 晚于结束日期 {end_date_str}"
             ));
         }
-        while current_date <= end_date {
-            dates_to_process.push(current_date.format("%Y-%m-%d").to_string());
-            // 正常递增日期，考虑到 chrono 的 Duration::days 足够安全
-            current_date += Duration::days(1);
-        }
+        // 使用迭代器和 collect 生成 Vec，取代可变变量和循环
+        let dates = current_date
+            .iter_days()
+            .take_while(|&d| d <= end_date)
+            .map(|d| d.format("%Y-%m-%d").to_string())
+            .collect();
+        Ok(dates)
     } else {
-        // 情况 B: 至少有一个日期不是标准格式，检查是否是特殊月份格式 (MM > 12)
+        // 情况 B: 至少有一个日期不是标准格式
         let begin_splits: Vec<&str> = begin_date_str.split('-').collect();
         let end_splits: Vec<&str> = end_date_str.split('-').collect();
 
-        if let (Some(year_str), Some(month_str), Some(begin_day_str), Some(end_day_str)) = (
-            begin_splits.first(),
-            begin_splits.get(1),
-            begin_splits.get(2),
-            end_splits.get(2),
-        ) {
-            if let (Ok(year), Ok(month), Ok(begin_day), Ok(end_day)) = (
-                year_str.parse::<u32>(),
-                month_str.parse::<u32>(),
-                begin_day_str.parse::<u32>(),
-                end_day_str.parse::<u32>(),
-            ) {
-                if month > 12 {
-                    // 确认是特殊月份格式
-                    if begin_day > end_day {
-                        return Err(format!(
-                            "特殊日期范围中，起始日 {begin_day} 晚于结束日 {end_day}"
-                        ));
-                    }
-                    for i in begin_day..=end_day {
-                        dates_to_process.push(format!("{year}-{month:02}-{i:02}"));
-                        // 使用原始的非标准月份
-                    }
-                } else {
-                    // 月份在 1-12 范围内，但 `NaiveDate::parse_from_str` 失败，说明是其他格式错误
-                    return Err(format!(
-                        "日期格式无效或解析失败：{begin_date_str} 或 {end_date_str}"
-                    ));
-                }
-            } else {
-                return Err(format!(
-                    "日期组件解析失败 (非数字)：{begin_date_str} 或 {end_date_str}"
-                ));
-            }
-        } else {
+        if begin_splits.len() != 3 || end_splits.len() != 3 {
             return Err(format!(
                 "日期格式不完整或无效：{begin_date_str} 或 {end_date_str}"
             ));
         }
-    }
+        let year_res = begin_splits[0].parse::<u32>();
+        let month_res = begin_splits[1].parse::<u32>();
+        let begin_day_res = begin_splits[2].parse::<u32>();
+        let end_day_res = end_splits[2].parse::<u32>();
 
-    Ok(dates_to_process)
+        if year_res.is_err() || month_res.is_err() || begin_day_res.is_err() || end_day_res.is_err()
+        {
+            return Err(format!(
+                "日期组件解析失败 (非数字)：{begin_date_str} 或 {end_date_str}"
+            ));
+        }
+
+        let (year, month, begin_day, end_day) = (
+            year_res.unwrap(),
+            month_res.unwrap(),
+            begin_day_res.unwrap(),
+            end_day_res.unwrap(),
+        );
+
+        if month <= 12 {
+            return Err(format!(
+                "日期格式无效或解析失败：{begin_date_str} 或 {end_date_str}"
+            ));
+        }
+
+        if begin_day > end_day {
+            return Err(format!(
+                "特殊日期范围中，起始日 {begin_day} 晚于结束日 {end_day}"
+            ));
+        }
+
+        let dates = (begin_day..=end_day)
+            .map(|i| format!("{year}-{month:02}-{i:02}"))
+            .collect();
+        Ok(dates)
+    }
 }
