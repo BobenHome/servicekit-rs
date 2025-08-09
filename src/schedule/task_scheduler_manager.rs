@@ -7,7 +7,6 @@ use crate::{
     AppConfig, AppContext, TaskExecutor,
 };
 use anyhow::{Context, Result};
-use chrono::Local;
 use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{error, info};
@@ -107,7 +106,6 @@ impl TaskSchedulerManager {
         ]
     }
 
-    // 这个函数接收一个实现了 TaskExecutor trait 的任务实例
     // 辅助函数：创建并调度一个任务的 Cron Job
     async fn create_schedule_job(
         &self,
@@ -118,25 +116,16 @@ impl TaskSchedulerManager {
         let primary_task_clone = Arc::clone(&primary_task);
         let job_name = primary_task_clone.name().to_string();
 
-        let job = Job::new_async_tz(cron_schedule,
-            chrono_tz::Asia::Shanghai,move |uuid, mut scheduler| {
+        let job = Job::new_async_tz(
+            cron_schedule,
+            chrono_tz::Asia::Shanghai,
+            move |uuid, _scheduler| {
                 let task = Arc::clone(&primary_task_clone);
                 let job_name_future = task.name().to_string();
                 let deps = dependent_tasks.clone();
 
                 Box::pin(async move {
-                    let next_time = match scheduler.next_tick_for_job(uuid).await {
-                        Ok(Some(dt)) => dt
-                            .with_timezone(&Local)
-                            .format("%Y-%m-%d %H:%M:%S")
-                            .to_string(),
-                        Ok(None) => "No next tick".to_string(),
-                        Err(e) => {
-                            error!("Error getting next tick for job {uuid:?}: {e:?}");
-                            "Error getting next tick".to_string()
-                        }
-                    };
-                    info!("Job '{job_name_future}' ({uuid:?}) is running. Next scheduled time: {next_time}");
+                    info!("Job '{job_name_future}' ({uuid:?}) is running.");
                     // --- 执行主任务 ---
                     if let Err(e) = task.execute().await {
                         error!("Error executing primary job '{job_name_future}' {uuid:?}: {e:?}");
