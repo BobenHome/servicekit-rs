@@ -53,7 +53,7 @@ impl TaskSchedulerManager {
 
         // 使用辅助函数创建并添加 CompositeTask 的 Cron Job
         // 添加到调度器
-        self.create_and_schedule_task_job(
+        self.create_schedule_job(
             composite_task, // Arc<CompositeTask> 会自动转换为 Arc<dyn TaskExecutor>
             app_config.tasks.psn_push.cron_schedule.as_str(),
             vec![],
@@ -109,7 +109,7 @@ impl TaskSchedulerManager {
 
     // 这个函数接收一个实现了 TaskExecutor trait 的任务实例
     // 辅助函数：创建并调度一个任务的 Cron Job
-    async fn create_and_schedule_task_job(
+    async fn create_schedule_job(
         &self,
         primary_task: Arc<dyn TaskExecutor + Send + Sync + 'static>, // 主任务
         cron_schedule: &str,
@@ -118,18 +118,14 @@ impl TaskSchedulerManager {
         let primary_task_clone = Arc::clone(&primary_task);
         let job_name = primary_task_clone.name().to_string();
 
-        // 克隆依赖任务（如果存在）给 Job 闭包
-        let dependent_tasks_clone_for_job = dependent_tasks.clone();
-
         let job = Job::new_async_tz(cron_schedule,
             chrono_tz::Asia::Shanghai,move |uuid, mut scheduler| {
-                let primary_task_for_future = Arc::clone(&primary_task_clone);
-                let job_name_for_future = primary_task_for_future.name().to_string();
-                // 克隆依赖任务给 inner async block
-                let dependent_tasks_for_future = dependent_tasks_clone_for_job.clone();
+                let task = Arc::clone(&primary_task_clone);
+                let job_name_future = task.name().to_string();
+                let deps = dependent_tasks.clone();
 
                 Box::pin(async move {
-                    let next_scheduled_time_str = match scheduler.next_tick_for_job(uuid).await {
+                    let next_time = match scheduler.next_tick_for_job(uuid).await {
                         Ok(Some(dt)) => dt
                             .with_timezone(&Local)
                             .format("%Y-%m-%d %H:%M:%S")
@@ -140,50 +136,14 @@ impl TaskSchedulerManager {
                             "Error getting next tick".to_string()
                         }
                     };
-                    info!(
-                        "Job '{job_name_for_future}' ({uuid:?}) is running. Next scheduled time (local): {next_scheduled_time_str}"
-                    );
-
+                    info!("Job '{job_name_future}' ({uuid:?}) is running. Next scheduled time: {next_time}");
                     // --- 执行主任务 ---
-                    if let Err(e) = primary_task_for_future.execute().await {
-                        error!(
-                            "Error executing primary job '{job_name_for_future}' {uuid:?}: {e:?}"
-                        );
+                    if let Err(e) = task.execute().await {
+                        error!("Error executing primary job '{job_name_future}' {uuid:?}: {e:?}");
                     } else {
-                        info!(
-                            "Primary job '{job_name_for_future}' ({uuid:?}) completed successfully."
-                        );
-                        // --- 遍历并执行所有依赖任务 ---
-                        if dependent_tasks_for_future.is_empty() {
-                            info!(
-                                "No dependent tasks to execute for '{job_name_for_future}'."
-                            );
-                        } else {
-                            info!(
-                                "Starting {} dependent tasks for '{job_name_for_future}'.",
-                                dependent_tasks_for_future.len()
-                            );
-                            for (i, dep_task) in dependent_tasks_for_future.iter().enumerate() {
-                                info!(
-                                    "Executing dependent task #{} for '{job_name_for_future}'.",
-                                    i + 1
-                                );
-                                // 依赖任务本身会打印其执行状态的日志
-                                if let Err(e) = dep_task.execute().await {
-                                    error!(
-                                        "Error executing dependent task #{} for '{job_name_for_future}': {e:?}",
-                                        i + 1
-                                    );
-                                    // 如果某个依赖任务失败，你可以选择是中断后续依赖任务，还是继续
-                                    // 这里我们选择继续执行其他依赖任务，但会记录错误
-                                } else {
-                                    info!(
-                                        "Dependent task #{} for '{job_name_for_future}' completed successfully.",
-                                        i + 1
-                                    );
-                                }
-                            }
-                        }
+                        info!("Primary job '{job_name_future}' ({uuid:?}) completed successfully.");
+                        // --- 执行依赖任务 ---
+                        Self::execute_dependent_tasks(&job_name_future, deps).await;
                     }
                 })
             },
@@ -197,5 +157,38 @@ impl TaskSchedulerManager {
         info!("Job '{job_name}' added to scheduler.");
 
         Ok(())
+    }
+
+    async fn execute_dependent_tasks(
+        primary_job_name: &str,
+        deps: Vec<Arc<dyn TaskExecutor + Send + Sync + 'static>>,
+    ) {
+        if deps.is_empty() {
+            info!("No dependent tasks to execute for '{primary_job_name}'.");
+            return;
+        }
+
+        info!(
+            "Starting {} dependent tasks for '{primary_job_name}'.",
+            deps.len()
+        );
+        // --- 遍历并执行所有依赖任务 ---
+        for (i, task) in deps.iter().enumerate() {
+            let task_num = i + 1;
+            info!("Executing dependent task #{task_num} for '{primary_job_name}'.");
+
+            match task.execute().await {
+                Ok(()) => {
+                    info!(
+                        "Dependent task #{task_num} for '{primary_job_name}' completed successfully."
+                    );
+                }
+                Err(e) => {
+                    error!(
+                        "Error executing dependent task #{task_num} for '{primary_job_name}': {e:?}"
+                    );
+                }
+            }
+        }
     }
 }
