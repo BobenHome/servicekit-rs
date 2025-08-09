@@ -29,10 +29,7 @@ impl GatewayClient {
     }
 
     /// 调用网关上的特定服务。
-    ///
-    /// `payload_data`: 请求体 `body.payload` 数组中的内容。
-    ///                 它是一个 `Vec<serde_json::Value>`，允许传递任意 JSON 数据，
-    ///                 通常是 QueryDTO 转换为的 JSON 对象。
+    /// `payload_data`: 请求体 `body.payload` 数组中的内容。它是一个 `Vec<serde_json::Value>`，允许传递任意 JSON 数据
     pub async fn invoke_gateway_service(
         &self,
         service_name: &str,
@@ -61,20 +58,19 @@ impl GatewayClient {
         };
 
         let service_message = ServiceMessage { header, body };
+        let gateway_url = &self.telecom_config.gateway_url;
         info!(
-            "Sending ServiceMessage to gateway: {}. Service: {}. ServiceMessage: {:?}",
-            self.telecom_config.gateway_url, service_name, service_message
+            "Sending ServiceMessage to gateway: {gateway_url}. Service: {service_name}. ServiceMessage: {service_message:?}"
         );
 
         let response = self
             .http_client
-            .post(&self.telecom_config.gateway_url) // 发送 POST 请求到网关 URL
+            .post(gateway_url) // 发送 POST 请求到网关 URL
             .json(&service_message) // 自动将 `service_message` 序列化为 JSON 并设置 Content-Type: application/json
             .send()
             .await
             .context(format!(
-                "Failed to send HTTP request to gateway at {}",
-                self.telecom_config.gateway_url
+                "Failed to send HTTP request to gateway at {gateway_url}"
             ))?;
 
         let status = response.status();

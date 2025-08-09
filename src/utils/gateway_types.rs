@@ -7,14 +7,14 @@ pub struct Destination {
     pub target: i32,
     pub service: String,
     pub mode: i32,
-    #[serde(rename = "sync")] // 确保 JSON 字段名为 "sync"
-    pub is_sync: bool, // 使用 is_sync 避免与 Rust 关键字冲突
+    #[serde(rename = "sync")]
+    pub is_sync: bool,
 }
 
 /// 对应 Java 中的 MessageHeader
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MessageHeader {
-    #[serde(rename = "messageId")] // Java 中是 messageId
+    #[serde(rename = "messageId")]
     pub message_id: String,
     pub op_code: i32,
     pub timestamp: i64, // Java 是 long (毫秒级), 对应 i64
