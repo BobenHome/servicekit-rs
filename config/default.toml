@@ -5,9 +5,10 @@ database_url = "mysql://dxxy:dreamsoft@2020@172.25.1.65:33063/dxxy"
 web_server_port = 8084
 
 # 所有任务的配置
-[tasks] # <--- 新增 tasks 段
-[tasks.psn_push] # <--- 针对 psn_push 任务的配置
+[tasks]
+[tasks.psn_push] # 针对 psn_push 任务的配置
 cron_schedule = "0 0 5 * * *" # 每天 5 点执行一次
+task_name = "培训班数据归档到MSS定时任务"
 
 # MSS 服务配置
 [mss_info_config]

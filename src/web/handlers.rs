@@ -16,7 +16,7 @@ use tracing::{error, info, warn};
 #[post("/pxb/pushMss")]
 pub async fn push_msss(
     app_context: web::Data<Arc<AppContext>>, // 注入 AppContext
-    body: web::Json<PushDataParams>,         // <--- 接收 JSON 请求体
+    body: web::Json<PushDataParams>,         // 接收 JSON 请求体
 ) -> Result<HttpResponse> {
     // 验证请求参数
     if let Err(e) = body.validate() {
@@ -27,7 +27,7 @@ pub async fn push_msss(
     let app_context = Arc::clone(&app_context);
 
     tokio::spawn(async move {
-        info!("********pxb mss pushByDate begin********");
+        info!("--------pxb mss pushByDate begin--------");
 
         // 直接从 `body` 结构体中获取数据，不再需要额外的 `clone()`
         let begin_date_opt = &body.begin_date;
@@ -72,7 +72,7 @@ pub async fn push_msss(
                 info!("=================={current_date} 处理完成=======================");
             }
         }
-        info!("********pxb mss pushByDate end********");
+        info!("--------pxb mss pushByDate end--------");
     });
 
     // 立即返回成功响应，因为处理是异步的

@@ -6,24 +6,26 @@ use serde::Deserialize;
 pub struct AppConfig {
     pub database_url: String,
     pub web_server_port: u16,
-    pub tasks: TasksConfig, // <--- 包含所有任务的配置
+    pub tasks: TasksConfig, // 包含所有任务的配置
     #[serde(skip)] // 序列化/反序列化时跳过，因为我们会在 new 方法中手动处理 Arc 包装
     pub mss_info_config: Arc<MssInfoConfig>,
     #[serde(skip)]
-    pub telecom_config: Arc<TelecomConfig>, // <--- 电信相关配置
+    pub telecom_config: Arc<TelecomConfig>, // 电信相关配置
     #[serde(skip)]
-    pub clickhouse_config: Arc<ClickhouseConfig>, // <--- ClickHouse 配置
+    pub clickhouse_config: Arc<ClickhouseConfig>, // ClickHouse配置
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct TasksConfig {
-    pub psn_push: PsnPushTaskConfig, // PsnPushTaskConfig 的配置
-                                     // pub another_task: AnotherTaskConfig, // <--- 如果有其他任务，可以在这里添加
+    pub psn_push: PsnPushTaskConfig,
+    // 其他任务继续添加
+    // pub another_task: AnotherTaskConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct PsnPushTaskConfig {
-    pub cron_schedule: String, // <--- 将 cron_schedule 移到任务自己的配置中
+    pub cron_schedule: String,
+    pub task_name: String, // 任务名称
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
