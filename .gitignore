@@ -3,6 +3,7 @@
 /logs
 .DS_Store
 .idea
+.jj
 *.iml
 *.log
 *.class
