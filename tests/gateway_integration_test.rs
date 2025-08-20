@@ -17,7 +17,7 @@ fn setup_logging_for_tests() {
         // 构建一个 FmtSubscriber，它会将日志输出到标准错误（被 cargo test 捕获）
         let subscriber = FmtSubscriber::builder()
             .with_writer(TestWriter::default()) // 专门用于测试环境，将日志输出到 `cargo test` 的输出流
-            .with_max_level(tracing::Level::INFO) // 设置您希望看到的最大日志级别，例如 INFO 或 DEBUG
+            .with_max_level(tracing::Level::DEBUG) // 设置您希望看到的最大日志级别，例如 INFO 或 DEBUG
             // .with_line_number(true) // 可选：显示行号
             // .with_file(true) // 可选：显示文件名
             .with_timer(LocalTimer)
@@ -41,10 +41,22 @@ async fn test_invoke_gateway_service_real_success() -> Result<()> {
     let app_config_arc = Arc::new(app_config);
     let client = GatewayClient::new(Client::new(), Arc::clone(&app_config_arc.telecom_config));
     // 3. 准备测试用的 payload 数据
-    let test_payload = vec![json!({"111111": 1})];
+    let _test_payload = vec![json!({"111111": 1})];
+    let test_payload = vec![
+        json!("1"),
+        json!("telecom"),
+        json!("org"),
+        json!("1755446400000"),
+        json!("1755532799000"),
+        json!({
+            "current_page": 1,
+            "page_size": 1
+        }),
+    ];
+
     // 4. 调用您要测试的方法。它现在会向真实的网关发送请求
     let result = client
-        .invoke_gateway_service("bj.bjglinfo.gettrainstatusbyid", test_payload)
+        .invoke_gateway_service("binlog.find", test_payload)
         .await;
     // 5. 断言结果
     assert!(
