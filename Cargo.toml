@@ -9,7 +9,6 @@ tokio = { version = "1.47", features = ["full"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
 log = "0.4"
-env_logger = "0.10"
 # Tracing 生态系统
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [
@@ -32,16 +31,13 @@ sqlx = { version = "0.8.6", features = [
 cron = "0.15.0"
 chrono-tz = "0.10.4"
 tokio-cron-scheduler = "0.14.0"
-uuid = { version = "1.17.0", features = ["v4"] }
+uuid = { version = "1.18.0", features = ["v4"] }
 anyhow = "1.0"
 reqwest = { version = "0.12", features = [
     "json",
     "rustls-tls",
 ], default-features = false }
 config = "0.15"
-
-mockito = "1.7"    # 用于模拟 HTTP 请求
-tokio-test = "0.4" # 用于在测试中更方便地运行异步代码
 
 clickhouse-rs = { git = "https://github.com/suharev7/clickhouse-rs.git", branch = "async-await" }
 futures = "0.3"
