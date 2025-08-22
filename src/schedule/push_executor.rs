@@ -9,7 +9,6 @@ use tracing::{error, info};
 use crate::schedule::BasePsnPushTask;
 use crate::utils::mss_client::psn_dos_push;
 use crate::{DynamicPsnData, PsnDataKind};
-use serde_json::json;
 
 pub const BATCH_SIZE: usize = 1000;
 
@@ -143,10 +142,12 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
             success_ids.push(current_id);
             // 成功后调用小助手接口，写入归档成功的班级
             if let DynamicPsnData::Class(class_data) = psn_data_enum {
-                let payload = vec![json!({&class_data.training_id: &class_data.training_status})];
                 let _ = base_task
                     .gateway_client
-                    .invoke_gateway_service("bj.bjglinfo.gettrainstatusbyid", payload)
+                    .update_newtca_train_status(
+                        &class_data.training_id,
+                        class_data.training_status.as_deref(),
+                    )
                     .await;
             } else {
                 info!("Skipping gateway service invocation for data of type '{psn_data_enum_name}'. Only 'Class' data is processed by gateway.");

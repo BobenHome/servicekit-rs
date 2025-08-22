@@ -18,8 +18,8 @@ fn setup_logging_for_tests() {
         let subscriber = FmtSubscriber::builder()
             .with_writer(TestWriter::default()) // 专门用于测试环境，将日志输出到 `cargo test` 的输出流
             .with_max_level(tracing::Level::DEBUG) // 设置您希望看到的最大日志级别，例如 INFO 或 DEBUG
-            // .with_line_number(true) // 可选：显示行号
-            // .with_file(true) // 可选：显示文件名
+            .with_line_number(true) // 可选：显示行号
+            .with_file(true) // 可选：显示文件名
             .with_timer(LocalTimer)
             .finish();
 
@@ -56,7 +56,11 @@ async fn test_invoke_gateway_service_real_success() -> Result<()> {
 
     // 4. 调用您要测试的方法。它现在会向真实的网关发送请求
     let result = client
-        .invoke_gateway_service("binlog.find", test_payload)
+        .invoke_gateway_service(
+            "binlog.find",
+            app_config_arc.telecom_config.targets.basedata,
+            test_payload,
+        )
         .await;
     // 5. 断言结果
     assert!(
@@ -64,7 +68,7 @@ async fn test_invoke_gateway_service_real_success() -> Result<()> {
         "调用真实网关服务预期成功，但发生了错误: {:?}",
         result.err()
     );
-    let reply = result.unwrap();
+    let reply = result?;
     assert_eq!(
         reply.header.message_code, 10000,
         "预期 message_code 为 10000，但实际为 {}",

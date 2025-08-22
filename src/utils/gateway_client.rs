@@ -12,7 +12,7 @@ use crate::config::TelecomConfig;
 use super::gateway_types::{
     Destination, MessageHeader, ServiceMessage, ServiceMessageBody, ServiceMessageReplyBuffer,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// 网关客户端，封装了与电信服务网关的 HTTP 通信。
 pub struct GatewayClient {
@@ -33,6 +33,7 @@ impl GatewayClient {
     pub async fn invoke_gateway_service(
         &self,
         service_name: &str,
+        target_app_id: u32,
         payload_data: Vec<Value>, // 传入 payload 数组中的具体数据
     ) -> Result<ServiceMessageReplyBuffer> {
         let message_id = Uuid::new_v4().to_string(); // 生成新的 UUID
@@ -40,7 +41,7 @@ impl GatewayClient {
 
         let destination = Destination {
             source: self.telecom_config.source_app_id,
-            target: self.telecom_config.target_app_id,
+            target: target_app_id,
             service: service_name.to_string(),
             mode: self.telecom_config.mode,
             is_sync: self.telecom_config.is_sync,
@@ -92,5 +93,19 @@ impl GatewayClient {
                 "Gateway call failed: Status={status}, Body={response_text}",
             ))
         }
+    }
+
+    pub async fn update_newtca_train_status(
+        &self,
+        training_id: &str,
+        training_status: Option<&str>,
+    ) -> Result<ServiceMessageReplyBuffer> {
+        let payload = vec![json!({training_id: training_status})];
+        self.invoke_gateway_service(
+            "bj.bjglinfo.gettrainstatusbyid",
+            self.telecom_config.targets.newtca,
+            payload,
+        )
+            .await
     }
 }

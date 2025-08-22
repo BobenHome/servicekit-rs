@@ -36,12 +36,18 @@ pub struct MssInfoConfig {
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
+pub struct Targets {
+    pub newtca: u32,
+    pub basedata: u32,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct TelecomConfig {
     pub gateway_url: String,
-    pub source_app_id: i32,
-    pub target_app_id: i32,
+    pub source_app_id: u32,
     pub mode: i32,
     pub is_sync: bool,
+    pub targets: Targets,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
