@@ -13,19 +13,26 @@ pub struct AppConfig {
     pub telecom_config: Arc<TelecomConfig>, // 电信相关配置
     #[serde(skip)]
     pub clickhouse_config: Arc<ClickhouseConfig>, // ClickHouse配置
+    #[serde(skip)]
+    pub redis_config: Arc<RedisConfig>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct TasksConfig {
     pub psn_push: PsnPushTaskConfig,
-    // 其他任务继续添加
-    // pub another_task: AnotherTaskConfig,
+    pub binlog_sync: BinlogSyncTaskConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct PsnPushTaskConfig {
     pub cron_schedule: String,
     pub task_name: String, // 任务名称
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct BinlogSyncTaskConfig {
+    pub cron_schedule: String,
+    pub task_name: String,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -68,6 +75,12 @@ struct RawAppConfig {
     pub mss_info_config: MssInfoConfig,
     pub telecom_config: TelecomConfig,
     pub clickhouse_config: ClickhouseConfig,
+    pub redis_config: RedisConfig,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct RedisConfig {
+    pub url: String,
 }
 
 impl AppConfig {
@@ -86,6 +99,7 @@ impl AppConfig {
             mss_info_config: Arc::new(raw_config.mss_info_config),
             telecom_config: Arc::new(raw_config.telecom_config),
             clickhouse_config: Arc::new(raw_config.clickhouse_config),
+            redis_config: Arc::new(raw_config.redis_config),
         })
     }
 }

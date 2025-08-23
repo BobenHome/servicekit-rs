@@ -1,17 +1,18 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Context, Ok, Result};
 use chrono::Utc;
 use reqwest::Client;
 use tracing::{error, info};
 use uuid::Uuid;
 
-use crate::config::TelecomConfig;
+use crate::{config::TelecomConfig, schedule::binlog_sync::ResultSet};
 
 // 导入我们定义的请求和响应结构
 use super::gateway_types::{
     Destination, MessageHeader, ServiceMessage, ServiceMessageBody, ServiceMessageReplyBuffer,
 };
+use crate::schedule::binlog_sync::{DataType, Page};
 use serde_json::{json, Value};
 
 /// 网关客户端，封装了与电信服务网关的 HTTP 通信。
@@ -82,7 +83,7 @@ impl GatewayClient {
             .await
             .context("Failed to read response body from gateway")?;
         if status.is_success() {
-            info!("Gateway call successful. Status: {status}. Response: {response_text}");
+            info!("Gateway call successful. Status: {status}.");
             // 尝试将 JSON 响应体反序列化为 ServiceMessageReplyBuffer
             serde_json::from_str(&response_text).context(format!(
                 "Failed to parse successful gateway response JSON from '{response_text}'"
@@ -106,6 +107,59 @@ impl GatewayClient {
             self.telecom_config.targets.newtca,
             payload,
         )
-            .await
+        .await
+    }
+
+    pub async fn binlog_find(
+        &self,
+        data_type: DataType,
+        start_time: i64,
+        end_time: i64,
+        current_page: Option<Page>,
+    ) -> Result<Option<ResultSet>> {
+        let page = current_page.unwrap_or_else(|| Page::new(1, 20));
+
+        let payload: Vec<Value> = vec![
+            json!(1),
+            json!("telecom"),
+            json!(data_type),
+            json!(start_time),
+            json!(end_time),
+            json!(page),
+        ];
+
+        let reply_buffer = self
+            .invoke_gateway_service("binlog.find", self.telecom_config.targets.basedata, payload)
+            .await?;
+
+        if reply_buffer.header.message_code != 10000 {
+            error!(
+                "Invalid message code: {}, description: {}",
+                reply_buffer.header.message_code, reply_buffer.header.description
+            );
+            return Ok(None);
+        }
+
+        // 解析响应
+        match &reply_buffer.body.payload {
+            Value::Object(payload_obj) => {
+                let parse_result =
+                    serde_json::from_value::<ResultSet>(Value::Object(payload_obj.clone()));
+                match parse_result {
+                    Result::Ok(result_set) => Ok(Some(result_set)),
+                    Err(e) => {
+                        error!("Failed to parse ResultSet from response: {}", e);
+                        Ok(None)
+                    }
+                }
+            }
+            _ => {
+                error!(
+                    "Unexpected response payload format: {:?}",
+                    reply_buffer.body.payload
+                );
+                Ok(None)
+            }
+        }
     }
 }

@@ -10,6 +10,7 @@ pub mod psntraining_push;
 pub mod psntraining_sc_push;
 pub mod push_executor;
 pub mod task_scheduler_manager;
+pub mod binlog_sync;
 
 pub use basepsn_push::BasePsnPushTask;
 pub use composite_task::CompositeTask;

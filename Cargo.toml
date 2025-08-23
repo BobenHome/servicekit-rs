@@ -41,6 +41,8 @@ config = "0.15"
 
 clickhouse-rs = { git = "https://github.com/suharev7/clickhouse-rs.git", branch = "async-await" }
 futures = "0.3"
+
+redis = { version = "0.32", features = ["tokio-comp", "connection-manager"] }
 [[bin]]
 name = "servicekit"
 path = "src/main.rs"

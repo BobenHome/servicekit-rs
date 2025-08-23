@@ -20,6 +20,7 @@ async fn main() -> Result<()> {
         Arc::clone(&app_config.mss_info_config),
         Arc::clone(&app_config.telecom_config),
         Arc::clone(&app_config.clickhouse_config),
+        Arc::clone(&app_config.redis_config),
     )
     .await?;
     let app_context_arc = Arc::new(app_context);

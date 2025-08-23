@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use crate::config::{MssInfoConfig, TelecomConfig};
+use crate::config::{MssInfoConfig, RedisConfig, TelecomConfig};
 use crate::db::mysql_pool;
+use crate::utils::redis::{init_redis, RedisMgr};
 use crate::utils::{ClickHouseClient, GatewayClient};
 use crate::ClickhouseConfig;
 use anyhow::{Context as _, Result};
@@ -17,6 +18,7 @@ pub struct AppContext {
     pub mss_info_config: Arc<MssInfoConfig>,
     pub gateway_client: Arc<GatewayClient>,
     pub clickhouse_client: Arc<ClickHouseClient>,
+    pub redis_mgr: RedisMgr,
 }
 
 impl AppContext {
@@ -25,6 +27,7 @@ impl AppContext {
         mss_info_config: Arc<MssInfoConfig>,
         telecom_config: Arc<TelecomConfig>,
         clickhouse_config: Arc<ClickhouseConfig>,
+        redis_config: Arc<RedisConfig>,
     ) -> Result<Self> {
         // --- Initialize MYSQL POOL ---
         let mysql_pool = mysql_pool::create_mysql_pool(database_url)
@@ -53,12 +56,18 @@ impl AppContext {
         );
         info!("ClickHouseClient initialized.");
 
+        let redis_mgr: RedisMgr = init_redis(&redis_config.url)
+            .await
+            .context("Failed to initialize Redis ConnectionManager")?;
+
+        info!("Redis ConnectionManager initialized.");
         Ok(Self {
             mysql_pool,
             http_client,
             mss_info_config,
             gateway_client,
             clickhouse_client,
+            redis_mgr,
         })
     }
 }

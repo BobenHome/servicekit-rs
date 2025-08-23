@@ -6,9 +6,12 @@ web_server_port = 8084
 
 # 所有任务的配置
 [tasks]
-[tasks.psn_push] # 针对 psn_push 任务的配置
+[tasks.psn_push] # psn_push任务
 cron_schedule = "0 0 5 * * *" # 每天 5 点执行一次
 task_name = "培训班数据归档到MSS定时任务"
+[tasks.binlog_sync] # binlog sync任务
+cron_schedule = "0 1 * * * *" # 每隔1分钟执行一次
+task_name = "binlog同步任务"
 
 # MSS 服务配置
 [mss_info_config]
@@ -20,9 +23,11 @@ app_url = "http://10.141.134.30:12500/serviceAgent/rest/hrapi/HrTrainInfo/pushTr
 [telecom_config]
 gateway_url = "http://gateway.mylearning.cn/service-gateway"
 source_app_id = 40026
-target_app_id = 40029
 mode = 0
 is_sync = true
+[telecom_config.targets]
+newtca = 40029
+basedata = 1
 
 # ClickHouse Configuration
 [clickhouse_config]
@@ -31,3 +36,7 @@ ports = [9000, 9001]
 user = "dba"
 password = "dba_dream"
 database = "DXXY_LOCAL"
+
+
+[redis_config]
+url = "redis://:dreamsoft%402023@172.25.1.154:6379/0"
