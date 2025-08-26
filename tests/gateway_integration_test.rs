@@ -30,7 +30,7 @@ fn setup_logging_for_tests() {
         tracing::subscriber::set_global_default(subscriber)
             .expect("Failed to set tracing subscriber for tests");
 
-        info!("*** Logging initialized for integration tests ***"); // 打印一条初始化成功的消息
+        info!("--- Logging initialized for integration tests ---"); // 打印一条初始化成功的消息
     });
 }
 
@@ -64,16 +64,15 @@ async fn test_invoke_gateway_service_real_success() -> Result<()> {
         Some(60),
     )
     .await?;
-
     let redis_value =
         servicekit::utils::redis::get_kv(&app_context_arc.redis_mgr.clone(), "name").await?;
-
     info!("Redis value: {:?}", redis_value);
 
     Ok(())
 }
 
-// #[tokio::test]
+#[tokio::test]
+#[ignore]
 async fn test_redislock_concurrent_acquire_and_release() -> Result<()> {
     // 日志、配置、AppContext 初始化（按你项目里已有代码）
     setup_logging_for_tests();
