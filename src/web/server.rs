@@ -27,7 +27,7 @@ impl WebServer {
                 .wrap(middleware::Compress::default()) // 启用响应压缩
                 .service(
                     web::scope("/api") // 创建一个 /api 范围
-                        .service(handlers::push_msss), // 注册处理函数
+                        .service(handlers::push_mss), // 注册处理函数
                 )
         })
         .bind(("127.0.0.1", self.port))

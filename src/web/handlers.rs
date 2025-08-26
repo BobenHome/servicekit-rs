@@ -14,7 +14,7 @@ use chrono::NaiveDate;
 use tracing::{error, info, warn};
 
 #[post("/pxb/pushMss")]
-pub async fn push_msss(
+pub async fn push_mss(
     app_context: web::Data<Arc<AppContext>>, // 注入 AppContext
     body: web::Json<PushDataParams>,         // 接收 JSON 请求体
 ) -> Result<HttpResponse> {

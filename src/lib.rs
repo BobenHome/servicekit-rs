@@ -13,6 +13,7 @@ pub trait TaskExecutor: Send + Sync + 'static {
     fn execute(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>>;
 }
 
+pub mod binlog;
 pub mod config;
 pub mod context;
 pub mod db;

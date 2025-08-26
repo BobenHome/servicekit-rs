@@ -46,6 +46,7 @@ pub struct MssInfoConfig {
 pub struct Targets {
     pub newtca: u32,
     pub basedata: u32,
+    pub mss: u32,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]

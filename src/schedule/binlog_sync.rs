@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
+use crate::binlog::OrgDataProcessor;
 use crate::utils::redis::{RedisLock, RedisMgr};
 use crate::{AppContext, TaskExecutor};
 
@@ -87,13 +88,15 @@ pub struct ModifyOperationLog {
     pub type_: u8,
     pub data_modify_time: i64,
     #[serde(rename = "entityMetaInfo")]
-    pub entity_meta_info: EntityMetaInfo,
+    pub entity_meta_info: Option<EntityMetaInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityMetaInfo {
     #[serde(rename = "dateCreated")]
     pub date_created: Option<i64>,
+    #[serde(rename = "dateLastModified")]
+    pub date_last_modified: Option<i64>,
 }
 
 pub struct BinlogSyncTimestampHolder {
@@ -205,8 +208,12 @@ impl BinlogSyncTask {
             timestamp + 300_000,                   // 5 分钟后
             chrono::Utc::now().timestamp_millis(), // 时间戳全球统一不区分时区
         );
-        for data_type in &[DataType::User, DataType::Org] {
+        // 创建处理器实例
+        let org_processor = OrgDataProcessor::new(self.app_context.clone());
+        for data_type in &[DataType::Org, DataType::User] {
             let mut current_page = None;
+            let mut all_items_for_type = Vec::new();
+            // 1. 首先，获取当前类型的所有分页数据
             loop {
                 match self
                     .app_context
@@ -216,12 +223,9 @@ impl BinlogSyncTask {
                 {
                     Some(result_set) => {
                         // 处理当前页的数据
-                        if let Some(items) = result_set.items {
+                        if let Some(mut items) = result_set.items {
                             // 处理日志项
-                            for log in items {
-                                // 处理每个 ModifyOperationLog
-                                info!("Processing log: {:?}", log);
-                            }
+                            all_items_for_type.append(&mut items);
                         }
                         // 检查是否还有下一页
                         if !result_set.page.has_next_page() {
@@ -230,6 +234,33 @@ impl BinlogSyncTask {
                         current_page = Some(result_set.page.next_page());
                     }
                     None => break,
+                }
+            }
+
+            // 2. 获取完所有数据后，根据类型分发给对应的处理器
+            if !all_items_for_type.is_empty() {
+                info!(
+                    "获取到类型 {:?} 的数据共 {} 条，开始处理...",
+                    data_type,
+                    all_items_for_type.len()
+                );
+                match data_type {
+                    DataType::Org => {
+                        if let Err(e) = org_processor
+                            .process_orgs_with_retry(all_items_for_type)
+                            .await
+                        {
+                            error!("处理组织数据时发生严重错误: {:?}", e);
+                        }
+                    }
+                    DataType::User => {
+                        // 如果有用户处理器，在这里调用
+                        // user_processor.process_users_with_retry(all_items_for_type).await?;
+                        info!("跳过用户数据处理。");
+                    }
+                    _ => {
+                        warn!("未知的 DataType: {:?}", data_type);
+                    }
                 }
             }
         }
