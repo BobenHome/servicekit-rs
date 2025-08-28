@@ -70,10 +70,7 @@ impl GatewayClient {
             .post(gateway_url) // 发送 POST 请求到网关 URL
             .json(&service_message) // 自动将 `service_message` 序列化为 JSON 并设置 Content-Type: application/json
             .send()
-            .await
-            .context(format!(
-                "Failed to send HTTP request to gateway at {gateway_url}"
-            ))?;
+            .await?;
 
         let status = response.status();
         info!("Gateway response status: {status}");
@@ -300,7 +297,11 @@ impl GatewayClient {
         ];
 
         let reply_buffer = self
-            .invoke_gateway_service("mss.organization.query", self.telecom_config.targets.mss, payload)
+            .invoke_gateway_service(
+                "mss.organization.query",
+                self.telecom_config.targets.mss,
+                payload,
+            )
             .await?;
 
         if reply_buffer.header.message_code != 10000 {

@@ -1,5 +1,5 @@
 # 数据库配置
-database_url = "mysql://dxxy:dreamsoft@2020@172.25.1.65:33063/dxxy"
+database_url = "mysql://dxxy:dreamsoft@2020@172.25.2.87:3306/dxxy"
 
 # Web 服务器端口
 web_server_port = 8084
@@ -21,13 +21,14 @@ app_url = "http://10.141.134.30:12500/serviceAgent/rest/hrapi/HrTrainInfo/pushTr
 
 # 电信相关配置
 [telecom_config]
-gateway_url = "http://gateway.mylearning.cn/service-gateway"
+gateway_url = "http://gateway.easyfun.com.cn/service-gateway"
 source_app_id = 40026
 mode = 0
 is_sync = true
 [telecom_config.targets]
 newtca = 40029
 basedata = 1
+mss = 1
 
 # ClickHouse Configuration
 [clickhouse_config]
