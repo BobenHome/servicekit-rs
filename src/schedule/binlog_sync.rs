@@ -117,6 +117,7 @@ impl BinlogSyncTimestampHolder {
         }
     }
 
+    /// 获取锁
     async fn acquire_lock(&self) -> Result<bool> {
         match RedisLock::try_acquire(&self.redis_mgr, BINLOG_SYNC_LOCK_KEY, 14400_000).await? {
             Some(lock) => {
@@ -153,7 +154,7 @@ impl BinlogSyncTimestampHolder {
         Ok(())
     }
 
-    /// 仅释放锁，不更新时间戳。用于错误或Panic恢复。
+    /// 释放锁
     async fn release_lock(&self) -> Result<()> {
         let opt_lock = {
             let mut guard = self.lock_holder.lock().await;
@@ -161,7 +162,7 @@ impl BinlogSyncTimestampHolder {
         };
 
         if let Some(lock) = opt_lock {
-            info!("Releasing redis lock due to an error or panic...");
+            info!("Releasing redis lock successfully.");
             if let Err(e) = lock.release(&self.redis_mgr).await {
                 error!("Failed to release redis lock during error recovery: {e:?}");
             }

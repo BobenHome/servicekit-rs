@@ -21,22 +21,17 @@ pub trait MapToProcessError<T> {
 impl<T> MapToProcessError<T> for Result<T, AnyhowError> {
     fn map_gateway_err(self) -> Result<T, ProcessError> {
         self.map_err(|e| {
-            error!("map_gateway_err: {:?}", e);
-            error!(
-                "e.root_cause().downcast_ref::<ReqwestError>(): {:?}",
-                e.root_cause().downcast_ref::<ReqwestError>()
-            );
-            if let Some(reqwest_err) = e.root_cause().downcast_ref::<ReqwestError>() {
-                error!("{:?}", reqwest_err);
+            if let Some(reqwest_err) = e.downcast_ref::<ReqwestError>() {
                 if reqwest_err.is_timeout() || reqwest_err.is_connect() || reqwest_err.is_request()
                 {
                     // is_timeout: 请求在指定时间内未完成
                     // is_connect: TCP连接被拒绝
                     // is_request: DNS解析失败、连接无法建立等在发送阶段发生的网络错误
+                    error!("request can be retried, reqwest_err: {reqwest_err:?}");
                     return ProcessError::GatewayTimeout(e.to_string());
                 }
             }
-            error!("other error: {:?}", e);
+            error!("other can not be retried error: {e:?}");
             ProcessError::Permanent(e)
         })
     }
