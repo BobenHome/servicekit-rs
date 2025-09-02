@@ -4,6 +4,7 @@ use servicekit::{
 };
 
 use servicekit::utils::redis::{RedisLock, RedisMgr};
+use servicekit::utils::MapToProcessError;
 use std::sync::{Arc, Once};
 use std::time::Duration;
 use tokio::task::JoinHandle;
@@ -55,7 +56,12 @@ async fn test_invoke_gateway_service_real_success() -> Result<()> {
     let app_context_arc = Arc::new(app_context);
 
     let binlog_sync_task = BinlogSyncTask::new(app_context_arc.clone());
-    binlog_sync_task.sync_data().await?;
+    match binlog_sync_task.sync_data().await.map_gateway_err() {
+        Ok(result) => {}
+        Err(err) => {
+            panic!("Failed to sync data: {}", err);
+        }
+    }
 
     servicekit::utils::redis::set_kv(
         &app_context_arc.redis_mgr.clone(),

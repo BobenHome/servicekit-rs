@@ -221,7 +221,7 @@ impl OrgDataProcessor {
         Self { app_context }
     }
     /// 主入口函数，包含了重试逻辑
-    pub async fn process_orgs_with_retry(&self, logs: Vec<ModifyOperationLog>) -> Result<()> {
+    pub async fn process_orgs(&self, logs: Vec<ModifyOperationLog>) -> Result<()> {
         // 将原始日志初始化为状态机的初始状态
         let mut states_to_process: Vec<ProcessingState> =
             logs.into_iter().map(ProcessingState::Initial).collect();
@@ -265,16 +265,21 @@ impl OrgDataProcessor {
             );
         }
         // 所有轮次结束后，一次性保存所有成功的数据
-        match self.save_processed_data(final_processed_data).await {
+        match self.save_processed_data(&final_processed_data).await {
             Ok(_) => info!("所有批次的组织数据已成功存入数据库。"),
             Err(e) => error!("最终保存处理后的组织数据失败: {e:?}"),
+        }
+
+        // 在 d_* 表更新成功后，调用刷新 mc_org_show 的逻辑
+        if let Err(e) = self.refresh_mc_org_show(&final_processed_data).await {
+            error!("刷新 mc_org_show 表失败: {e:?}");
         }
 
         Ok(())
     }
 
     /// 保存处理好的数据到数据库
-    async fn save_processed_data(&self, data: ProcessedOrgData) -> Result<()> {
+    async fn save_processed_data(&self, data: &ProcessedOrgData) -> Result<()> {
         let mut tx = self.app_context.mysql_pool.begin().await?;
         // --- 1. 执行批量刪除 ---
         info!("开始批量删除旧数据...");
@@ -306,7 +311,8 @@ impl OrgDataProcessor {
         // 1. 插入 TelecomOrg
         let orgs_to_insert = data
             .telecom_orgs
-            .into_iter()
+            .iter()
+            .cloned()
             .unique_by(|o| o.id.clone())
             .collect::<Vec<_>>();
         if !orgs_to_insert.is_empty() {
@@ -316,7 +322,8 @@ impl OrgDataProcessor {
         // 2. 插入 TelecomOrgTree
         let org_trees_to_insert = data
             .telecom_org_trees
-            .into_iter()
+            .iter()
+            .cloned()
             .unique_by(|o| o.id.clone())
             .collect::<Vec<_>>();
         if !org_trees_to_insert.is_empty() {
@@ -327,7 +334,8 @@ impl OrgDataProcessor {
         // 3. 插入 TelecomMssOrgMapping
         let mss_org_mappings_to_insert = data
             .telecom_mss_org_mappings
-            .into_iter()
+            .iter()
+            .cloned()
             .unique_by(|o| o.code.clone())
             .collect::<Vec<_>>();
         if !mss_org_mappings_to_insert.is_empty() {
@@ -338,7 +346,8 @@ impl OrgDataProcessor {
         // 4. 插入 TelecomMssOrg
         let mss_orgs_to_insert = data
             .telecom_mss_orgs
-            .into_iter()
+            .iter()
+            .cloned()
             .unique_by(|o| o.id.clone())
             .collect::<Vec<_>>();
         if !mss_orgs_to_insert.is_empty() {
@@ -346,6 +355,208 @@ impl OrgDataProcessor {
                 .await?
         }
         tx.commit().await?;
+        Ok(())
+    }
+
+    /// 根据受影响的组织ID，增量刷新 mc_org_show 表
+    async fn refresh_mc_org_show(&self, data: &ProcessedOrgData) -> Result<()> {
+        // 1. 收集本次批次所有受影响的、唯一的组织ID
+        let mut affected_ids = data
+            .org_ids_to_delete
+            .iter()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
+        for org in &data.telecom_orgs {
+            affected_ids.insert(org.id.clone());
+        }
+        let unique_affected_ids: Vec<String> = affected_ids.into_iter().collect();
+
+        if unique_affected_ids.is_empty() {
+            info!("没有组织数据变更，无需刷新 mc_org_show。");
+            return Ok(());
+        }
+        info!(
+            "开始刷新 mc_org_show 表，受影响的组织ID数量: {}",
+            unique_affected_ids.len()
+        );
+        // 2. 开启一个新的事务来处理刷新逻辑
+        let mut tx = self.app_context.mysql_pool.begin().await?;
+
+        // 3. (Delete) 先从 mc_org_show 中删除所有受影响的记录
+        self.batch_delete(&mut tx, "mc_org_show", "ID", &unique_affected_ids)
+            .await?;
+
+        // 4. (Insert) 重新计算并插入需要存在的数据
+        //    只为那些需要新增或更新的组织（即存在于 telecom_orgs 列表中的）执行插入
+        let ids_to_insert: Vec<String> = data.telecom_orgs.iter().map(|o| o.id.clone()).collect();
+
+        if !ids_to_insert.is_empty() {
+            // 这是您提供的复杂SQL，我们只在末尾增加了 WHERE 条件
+            let insert_select_sql = format!(
+                r#"
+                INSERT INTO mc_org_show(ID,
+                                        IS_CORP,
+                                        NO,
+                                        NAME,
+                                        ABBREVIATION,
+                                        REMARK,
+                                        TYPE,
+                                        DISTRICT,
+                                        COMPANY_NATURE,
+                                        COMPANY_TYPE,
+                                        COMPANY_ID,
+                                        ORG_TYPE,
+                                        DEPT_LEVEL,
+                                        DEPT_TYPE,
+                                        LEGAL,
+                                        TAXPAYER_NUMBER,
+                                        WEBSITE,
+                                        BUSINESS_ADDRESS,
+                                        BUSINESS_CAPITAL,
+                                        AREA,
+                                        A_CODE,
+                                        PROVINCE,
+                                        P_CODE,
+                                        CITY,
+                                        C_CODE,
+                                        CTCPROVINCE,
+                                        CTCAREA,
+                                        CTCCITY,
+                                        LEAF,
+                                        OLEVEL,
+                                        PARENT,
+                                        WEIGHT,
+                                        ANCESTORS,
+                                        GLOBLE,
+                                        IS_DELETE,
+                                        YEAR,
+                                        MONTH,
+                                        MSSID,
+                                        MSSIDENTITY,
+                                        MSSCODE,
+                                        MSSHRCODE,
+                                        MSSNAME,
+                                        MSSTYPE,
+                                        MSSPARENTCOMPANYCODE,
+                                        MSSPARENTDEPARTMENTCODE,
+                                        MSSSTATUS,
+                                        MSSCHIEFLEADER,
+                                        MSSDEPUTYLEADER,
+                                        MSSCOMPANYTYPE,
+                                        MSSDEPARTMENTTYPE,
+                                        MSSDEPARTMENTLEVEL,
+                                        CODE_3,
+                                        CODE_4,
+                                        CODE_5,
+                                        CODE_6,
+                                        CODE_7,
+                                        CODE_8,
+                                        CODE_9,
+                                        DIRECTLY_NUM,
+                                        ATTACHED_NUM,
+                                        COMPANY_NAME,
+                                        COMPANY_GLOBLE,
+                                        COMPANY_GLOBLE_NAME,
+                                        GLOBLE_NAME,
+                                        LOG_SDATE)
+                SELECT TE.ID,
+                       TE.IS_CORP,
+                       TE.NO,
+                       TE.NAME,
+                       TE.ABBREVIATION,
+                       TE.REMARK,
+                       TE.TYPE,
+                       ''                                                                                   AS DISTRICT,
+                       ''                                                                                   AS COMPANY_NATURE,
+                       TE.COMPANY_TYPE,
+                       TE.COMPANY_ID,
+                       TE.ORG_TYPE,
+                       TE.DEPT_LEVEL,
+                       TE.DEPT_TYPE,
+                       TE.LEGAL,
+                       TE.TAXPAYER_NUMBER,
+                       TE.WEBSITE,
+                       TE.BUSINESS_ADDRESS,
+                       TE.BUSINESS_CAPITAL,
+                       ''                                                                                   AS AREA,
+                       ''                                                                                   AS A_CODE,
+                       TE.PROVINCE,
+                       TE.P_CODE,
+                       TE.CITY                                                                              AS CITY,
+                       TE.C_CODE                                                                            AS C_CODE,
+                       ''                                                                                   AS CTCPROVINCE,
+                       ''                                                                                   AS CTCAREA,
+                       ''                                                                                   AS CTCCITY,
+                       TR.LEAF                                                                              AS LEAF,
+                       TRUNCATE((LENGTH(tr.ancestors) - LENGTH(REPLACE(tr.ancestors, '，', ''))) / 3, 0) + 2 AS OLEVEL,
+                       TR.PARENT                                                                            AS PARENT,
+                       TE.WEIGHT                                                                            AS WEIGHT,
+                       TR.ANCESTORS                                                                         AS ANCESTORS,
+                       TE.FULL_PATH_ID                                                                      AS GLOBLE,
+                       TE.IS_DELETE                                                                         AS IS_DELETE,
+                       TE.YEAR                                                                              AS YEAR,
+                       TE.MONTH                                                                             AS MONTH,
+                       MO.ID                                                                                AS MSSID,
+                       MO.IDENTITY                                                                          AS MSSIDENTITY,
+                       MO.CODE                                                                              AS MSSCODE,
+                       MO.HRCODE                                                                            AS MSSHRCODE,
+                       MO.NAME                                                                              AS MSSNAME,
+                       MO.TYPE                                                                              AS MSSTYPE,
+                       MO.PARENTCOMPANYCODE                                                                 AS MSSPARENTCOMPANYCODE,
+                       MO.PARENTDEPARTMENTCODE                                                              AS MSSPARENTDEPARTMENTCODE,
+                       MO.STATUS                                                                            AS MSSSTATUS,
+                       ''                                                                                   AS MSSCHIEFLEADER,
+                       ''                                                                                   AS MSSDEPUTYLEADER,
+                       MO.COMPANYTYPE                                                                       AS MSSCOMPANYTYPE,
+                       ''                                                                                   AS MSSDEPARTMENTTYPE,
+                       ''                                                                                   AS MSSDEPARTMENTLEVEL,
+                       IF((LENGTH(TR.FULL_PATH_ID) - LENGTH(REPLACE(TR.FULL_PATH_ID, ',', ''))) / LENGTH(',') >= 2,
+                          SUBSTRING_INDEX(SUBSTRING_INDEX(TR.FULL_PATH_ID, ',', 3), ',', -1), NULL)         AS CODE_3,
+                       IF((LENGTH(TR.FULL_PATH_ID) - LENGTH(REPLACE(TR.FULL_PATH_ID, ',', ''))) / LENGTH(',') >= 3,
+                          SUBSTRING_INDEX(SUBSTRING_INDEX(TR.FULL_PATH_ID, ',', 4), ',', -1), NULL)         AS CODE_4,
+                       IF((LENGTH(TR.FULL_PATH_ID) - LENGTH(REPLACE(TR.FULL_PATH_ID, ',', ''))) / LENGTH(',') >= 4,
+                          SUBSTRING_INDEX(SUBSTRING_INDEX(TR.FULL_PATH_ID, ',', 5), ',', -1), NULL)         AS CODE_5,
+                       IF((LENGTH(TR.FULL_PATH_ID) - LENGTH(REPLACE(TR.FULL_PATH_ID, ',', ''))) / LENGTH(',') >= 5,
+                          SUBSTRING_INDEX(SUBSTRING_INDEX(TR.FULL_PATH_ID, ',', 6), ',', -1), NULL)         AS CODE_6,
+                       IF((LENGTH(TR.FULL_PATH_ID) - LENGTH(REPLACE(TR.FULL_PATH_ID, ',', ''))) / LENGTH(',') >= 6,
+                          SUBSTRING_INDEX(SUBSTRING_INDEX(TR.FULL_PATH_ID, ',', 7), ',', -1), NULL)         AS CODE_7,
+                       IF((LENGTH(TR.FULL_PATH_ID) - LENGTH(REPLACE(TR.FULL_PATH_ID, ',', ''))) / LENGTH(',') >= 7,
+                          SUBSTRING_INDEX(SUBSTRING_INDEX(TR.FULL_PATH_ID, ',', 8), ',', -1), NULL)         AS CODE_8,
+                       IF((LENGTH(TR.FULL_PATH_ID) - LENGTH(REPLACE(TR.FULL_PATH_ID, ',', ''))) / LENGTH(',') >= 8,
+                          SUBSTRING_INDEX(SUBSTRING_INDEX(TR.FULL_PATH_ID, ',', 9), '，', -1), NULL)         AS CODE_9,
+                       (SELECT COUNT(U.ID) FROM mc_user_ztk U WHERE U.ORG = TE.ID)                          AS DIRECTLY_NUM,
+                       0                                                                                    AS ATTACHED_NUM,
+                       TR.NAME                                                                              AS COMPANY_NAME,
+                       TR.FULL_PATH_ID                                                                      AS COMPANY_GLOBLE,
+                       TR.FULL_PATH_NAME                                                                    AS COMPANY_GLOBLE_NAME,
+                       TE.FULL_PATH_NAME                                                                    AS GLOBLE_NAME,
+                       DATE_FORMAT(NOW(), '%Y-%m-%d')                                                       AS LOG_SDATE
+                FROM d_telecom_org TE
+                         LEFT JOIN d_telecom_org_tree TR
+                                   ON TE.ID = TR.ID
+                         LEFT JOIN d_mss_org_mapping MOM
+                                   ON TE.ID = MOM.CODE
+                         LEFT JOIN d_mss_org MO
+                                   ON MOM.MSSCODE = MO.HRCODE AND MO.STATUS = '1'
+                WHERE TE.ID IN ({})
+                "#,
+                ids_to_insert
+                    .iter()
+                    .map(|_| "?")
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+            let mut query = sqlx::query(&insert_select_sql);
+            for id in &ids_to_insert {
+                query = query.bind(id);
+            }
+            let result = query.execute(tx.deref_mut()).await?;
+            info!("向 mc_org_show 插入了 {} 条新记录", result.rows_affected());
+        }
+        // 5. 提交事务
+        tx.commit().await?;
+        info!("mc_org_show 表刷新完成。");
+
         Ok(())
     }
 
@@ -461,7 +672,9 @@ impl OrgDataProcessor {
             year,
             month,
             hitdate1,
-            amount
+            amount,
+            full_path_id,
+            full_path_name
         ) ",
         );
         query_builder.push_values(orgs, |mut b, org| {
@@ -549,7 +762,9 @@ impl OrgDataProcessor {
                 .push_bind(org.year)
                 .push_bind(org.month)
                 .push_bind(org.hit_date1)
-                .push_bind(None::<String>); // amount 设为 NULL
+                .push_bind(None::<String>) // amount 设为 NULL
+                .push_bind(org.full_path_id)
+                .push_bind(org.full_path_name);
         });
         let query = query_builder.build();
         query.execute(tx.deref_mut()).await?;
@@ -578,7 +793,9 @@ impl OrgDataProcessor {
             LEAF,
             ANCESTORS,
             D_DELETE,
-            IS_DELETE
+            IS_DELETE,
+            full_path_id,
+            full_path_name
         ) ",
         );
         query_builder.push_values(org_trees, |mut b, org_tree| {
@@ -605,7 +822,9 @@ impl OrgDataProcessor {
                 .push_bind(org_tree.leaf)
                 .push_bind(ancestors)
                 .push_bind(org_tree.delete)
-                .push_bind(org_tree.is_delete);
+                .push_bind(org_tree.is_delete)
+                .push_bind(org_tree.full_path_id)
+                .push_bind(org_tree.full_path_name);
         });
         let query = query_builder.build();
         query.execute(&mut **tx).await?;
@@ -852,7 +1071,11 @@ impl OrgDataProcessor {
                 }
             }
         }
-        info!("states_for_retry {:?} len: {}", states_for_retry, states_for_retry.len());
+        info!(
+            "states_for_retry {:?} len: {}",
+            states_for_retry,
+            states_for_retry.len()
+        );
         (processed_data, states_for_retry, permanent_failures)
     }
 
