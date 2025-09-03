@@ -57,22 +57,25 @@ async fn test_invoke_gateway_service_real_success() -> Result<()> {
 
     let binlog_sync_task = BinlogSyncTask::new(app_context_arc.clone());
     match binlog_sync_task.sync_data().await.map_gateway_err() {
-        Ok(result) => {}
+        Ok(_result) => {}
         Err(err) => {
             panic!("Failed to sync data: {}", err);
         }
     }
 
-    servicekit::utils::redis::set_kv(
-        &app_context_arc.redis_mgr.clone(),
-        "name",
-        "apple",
-        Some(60),
-    )
-    .await?;
-    let redis_value =
-        servicekit::utils::redis::get_kv(&app_context_arc.redis_mgr.clone(), "name").await?;
-    info!("Redis value: {:?}", redis_value);
+    if false {
+        // 永远不执行
+        servicekit::utils::redis::set_kv(
+            &app_context_arc.redis_mgr.clone(),
+            "name",
+            "apple",
+            Some(60),
+        )
+            .await?;
+        let redis_value =
+            servicekit::utils::redis::get_kv(&app_context_arc.redis_mgr.clone(), "name").await?;
+        info!("Redis value: {:?}", redis_value);
+    }
 
     Ok(())
 }

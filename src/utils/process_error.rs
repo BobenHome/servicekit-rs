@@ -31,7 +31,7 @@ impl<T> MapToProcessError<T> for Result<T, AnyhowError> {
                     return ProcessError::GatewayTimeout(e.to_string());
                 }
             }
-            error!("other can not be retried error: {e:?}");
+            error!("other error can not be retried: {e:?}");
             ProcessError::Permanent(e)
         })
     }

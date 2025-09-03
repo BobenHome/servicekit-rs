@@ -150,7 +150,7 @@ impl BinlogSyncTimestampHolder {
             .await
             .context("Failed to update timestamp")?;
 
-        info!("Updated timestamp to {}", timestamp);
+        info!("Updated timestamp to {timestamp}");
         Ok(())
     }
 
@@ -279,20 +279,20 @@ impl BinlogSyncTask {
                 // 2. 获取完所有数据后，根据类型分发给对应的处理器
                 if !all_items_for_type.is_empty() {
                     let items_len = all_items_for_type.len();
-                    info!("获取到类型 {data_type:?} 的数据共 {items_len} 条，开始处理...");
+                    info!("Retrieved {items_len} records for type {data_type:?}, starting processing...");
                     match data_type {
                         DataType::Org => {
                             if let Err(e) = org_processor.process_orgs(all_items_for_type).await {
-                                error!("处理组织数据时发生严重错误: {e:?}");
+                                error!("Critical error occurred while processing organization data: {e:?}");
                             }
                         }
                         DataType::User => {
                             // 如果有用户处理器，在这里调用
                             // user_processor.process_users_with_retry(all_items_for_type).await?;
-                            info!("跳过用户数据处理。");
+                            info!("Skipping user data processing.");
                         }
                         _ => {
-                            warn!("未知的 DataType: {data_type:?}");
+                            warn!("Unknown DataType: {data_type:?}");
                         }
                     }
                 }
@@ -309,9 +309,9 @@ impl TaskExecutor for BinlogSyncTask {
     fn execute(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         Box::pin(async move {
             info!("Starting binlog sync task...");
-            // Execute User sync
+            // Execute Binlog sync
             if let Err(e) = self.sync_data().await {
-                error!("Failed to sync organization data: {}", e);
+                error!("Failed to sync organization data: {e:?}");
             }
             info!("Binlog sync task completed.");
             Ok(())

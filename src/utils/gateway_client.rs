@@ -73,14 +73,13 @@ impl GatewayClient {
             .await?;
 
         let status = response.status();
-        info!("Gateway response status: {status}");
 
         let response_text = response
             .text()
             .await
             .context("Failed to read response body from gateway")?;
         if status.is_success() {
-            info!("Gateway call successful. Status: {status}.");
+            info!("Gateway call successful with status: {status}.");
             // 尝试将 JSON 响应体反序列化为 ServiceMessageReplyBuffer
             serde_json::from_str(&response_text).context(format!(
                 "Failed to parse successful gateway response JSON from '{response_text}'"
@@ -145,7 +144,7 @@ impl GatewayClient {
                 match parse_result {
                     Result::Ok(result_set) => Ok(Some(result_set)),
                     Err(e) => {
-                        error!("Failed to parse ResultSet from response: {}", e);
+                        error!("Failed to parse ResultSet from response: {e:?}");
                         Ok(None)
                     }
                 }
@@ -187,7 +186,7 @@ impl GatewayClient {
                 match parse_result {
                     Result::Ok(telecom_org) => Ok(Some(telecom_org)),
                     Err(e) => {
-                        error!("Failed to parse TelecomOrg from response: {}", e);
+                        error!("Failed to parse TelecomOrg from response: {e:?}");
                         Ok(None)
                     }
                 }
@@ -228,7 +227,7 @@ impl GatewayClient {
                 match parse_result {
                     Result::Ok(telecom_org_tree) => Ok(Some(telecom_org_tree)),
                     Err(e) => {
-                        error!("Failed to parse TelecomOrgTree from response: {}", e);
+                        error!("Failed to parse TelecomOrgTree from response: {e:?}");
                         Ok(None)
                     }
                 }
@@ -273,7 +272,7 @@ impl GatewayClient {
                 match parse_result {
                     Result::Ok(telecom_mss_org_mapping) => Ok(Some(telecom_mss_org_mapping)),
                     Err(e) => {
-                        error!("Failed to parse TelecomMssOrgMapping from response: {}", e);
+                        error!("Failed to parse TelecomMssOrgMapping from response: {e:?}");
                         Ok(None)
                     }
                 }
@@ -320,7 +319,7 @@ impl GatewayClient {
                 match parse_result {
                     Result::Ok(vec_telecom_mss_org) => Ok(Some(vec_telecom_mss_org)),
                     Err(e) => {
-                        error!("Failed to parse TelecomMssOrg from response: {}", e);
+                        error!("Failed to parse TelecomMssOrg from response: {e:?}");
                         Ok(None)
                     }
                 }

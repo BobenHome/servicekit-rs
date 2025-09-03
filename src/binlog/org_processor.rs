@@ -6,7 +6,7 @@ use anyhow::Result;
 use chrono::{Local, NaiveDateTime};
 use itertools::Itertools; // 使用 itertools::Itertools::unique_by 来去重
 use serde::{Deserialize, Serialize};
-use sqlx::{MySql, QueryBuilder, Transaction};
+use sqlx::{Execute, MySql, QueryBuilder, Transaction};
 use std::ops::DerefMut;
 use std::sync::Arc;
 use tracing::{error, info};
@@ -180,15 +180,9 @@ enum ProcessingState {
     // 成功获取 TelecomOrg，保存下来
     GotTelecomOrg(ModifyOperationLog, TelecomOrg),
     // 成功获取 OrgTree，保存之前的结果
-    GotOrgTree(ModifyOperationLog, TelecomOrg, TelecomOrgTree),
+    GotOrgTree(ModifyOperationLog, TelecomOrgTree),
     // 成功获取 MssMapping，保存之前的所有结果
-    GotMssMapping(
-        ModifyOperationLog,
-        TelecomOrg,
-        TelecomOrgTree,
-        TelecomMssOrgMapping,
-        String,
-    ),
+    GotMssMapping(ModifyOperationLog, TelecomMssOrgMapping, String),
 }
 
 // 用于记录永久失败的日志和原因
@@ -202,14 +196,7 @@ enum Transition {
     // 状态成功向前推进，这是新的状态
     Advanced(ProcessingState),
     // 所有步骤已成功完成，并携带最后一步获取的数据
-    Completed(
-        ModifyOperationLog,
-        TelecomOrg,
-        TelecomOrgTree,
-        TelecomMssOrgMapping,
-        String,
-        Vec<TelecomMssOrg>,
-    ),
+    Completed(ModifyOperationLog, Vec<TelecomMssOrg>),
 }
 
 pub struct OrgDataProcessor {
@@ -230,11 +217,11 @@ impl OrgDataProcessor {
 
         for i in 0..MAX_RETRIES {
             if states_to_process.is_empty() {
-                info!("所有组织数据都已成功处理。");
+                info!("All organization data has been successfully processed.");
                 break;
             }
             info!(
-                "开始处理组织数据，剩余 {} 次重试机会。待处理数量: {}",
+                "Processing organization data, {} retry attempts remaining. Pending count: {}",
                 MAX_RETRIES - i,
                 states_to_process.len()
             );
@@ -249,7 +236,7 @@ impl OrgDataProcessor {
             if !permanent_failures.is_empty() {
                 for failure in permanent_failures {
                     error!(
-                        "日志处理永久失败，将不再重试。原因: {}. Log: {:?}",
+                        "Processing permanently failed, will not retry. Reason: {}. Log: {:?}",
                         failure.reason, failure.log
                     );
                 }
@@ -260,19 +247,19 @@ impl OrgDataProcessor {
         // 重试次数用尽后，如果仍有未处理的状态，则记录错误
         if !states_to_process.is_empty() {
             error!(
-                "组织数据处理重试次数已用尽，仍有 {} 条日志未处理完成。",
+                "Maximum retries reached, {} logs still unprocessed.",
                 states_to_process.len()
             );
         }
         // 所有轮次结束后，一次性保存所有成功的数据
         match self.save_processed_data(&final_processed_data).await {
-            Ok(_) => info!("所有批次的组织数据已成功存入数据库。"),
-            Err(e) => error!("最终保存处理后的组织数据失败: {e:?}"),
+            Ok(_) => info!("All batches of organization data successfully saved to database."),
+            Err(e) => error!("Failed to refresh mc_org_show table: {e:?}"),
         }
 
         // 在 d_* 表更新成功后，调用刷新 mc_org_show 的逻辑
         if let Err(e) = self.refresh_mc_org_show(&final_processed_data).await {
-            error!("刷新 mc_org_show 表失败: {e:?}");
+            error!("Failed to refresh mc_org_show table: {e:?}");
         }
 
         Ok(())
@@ -282,7 +269,7 @@ impl OrgDataProcessor {
     async fn save_processed_data(&self, data: &ProcessedOrgData) -> Result<()> {
         let mut tx = self.app_context.mysql_pool.begin().await?;
         // --- 1. 执行批量刪除 ---
-        info!("开始批量删除旧数据...");
+        info!("Starting batch deletion of old data...");
         self.batch_delete(&mut tx, "d_telecom_org", "id", &data.org_ids_to_delete)
             .await?;
         self.batch_delete(
@@ -307,7 +294,7 @@ impl OrgDataProcessor {
         )
         .await?;
         // --- 2. 执行批量插入 ---
-        info!("开始批量插入新数据...");
+        info!("Starting batch insertion of new data...");
         // 1. 插入 TelecomOrg
         let orgs_to_insert = data
             .telecom_orgs
@@ -372,11 +359,11 @@ impl OrgDataProcessor {
         let unique_affected_ids: Vec<String> = affected_ids.into_iter().collect();
 
         if unique_affected_ids.is_empty() {
-            info!("没有组织数据变更，无需刷新 mc_org_show。");
+            info!("No organization data changes, no need to refresh mc_org_show.");
             return Ok(());
         }
         info!(
-            "开始刷新 mc_org_show 表，受影响的组织ID数量: {}",
+            "Starting refresh of mc_org_show table, affected organization ID count: {}",
             unique_affected_ids.len()
         );
         // 2. 开启一个新的事务来处理刷新逻辑
@@ -391,171 +378,30 @@ impl OrgDataProcessor {
         let ids_to_insert: Vec<String> = data.telecom_orgs.iter().map(|o| o.id.clone()).collect();
 
         if !ids_to_insert.is_empty() {
-            // 这是您提供的复杂SQL，我们只在末尾增加了 WHERE 条件
-            let insert_select_sql = format!(
-                r#"
-                INSERT INTO mc_org_show(ID,
-                                        IS_CORP,
-                                        NO,
-                                        NAME,
-                                        ABBREVIATION,
-                                        REMARK,
-                                        TYPE,
-                                        DISTRICT,
-                                        COMPANY_NATURE,
-                                        COMPANY_TYPE,
-                                        COMPANY_ID,
-                                        ORG_TYPE,
-                                        DEPT_LEVEL,
-                                        DEPT_TYPE,
-                                        LEGAL,
-                                        TAXPAYER_NUMBER,
-                                        WEBSITE,
-                                        BUSINESS_ADDRESS,
-                                        BUSINESS_CAPITAL,
-                                        AREA,
-                                        A_CODE,
-                                        PROVINCE,
-                                        P_CODE,
-                                        CITY,
-                                        C_CODE,
-                                        CTCPROVINCE,
-                                        CTCAREA,
-                                        CTCCITY,
-                                        LEAF,
-                                        OLEVEL,
-                                        PARENT,
-                                        WEIGHT,
-                                        ANCESTORS,
-                                        GLOBLE,
-                                        IS_DELETE,
-                                        YEAR,
-                                        MONTH,
-                                        MSSID,
-                                        MSSIDENTITY,
-                                        MSSCODE,
-                                        MSSHRCODE,
-                                        MSSNAME,
-                                        MSSTYPE,
-                                        MSSPARENTCOMPANYCODE,
-                                        MSSPARENTDEPARTMENTCODE,
-                                        MSSSTATUS,
-                                        MSSCHIEFLEADER,
-                                        MSSDEPUTYLEADER,
-                                        MSSCOMPANYTYPE,
-                                        MSSDEPARTMENTTYPE,
-                                        MSSDEPARTMENTLEVEL,
-                                        CODE_3,
-                                        CODE_4,
-                                        CODE_5,
-                                        CODE_6,
-                                        CODE_7,
-                                        CODE_8,
-                                        CODE_9,
-                                        DIRECTLY_NUM,
-                                        ATTACHED_NUM,
-                                        COMPANY_NAME,
-                                        COMPANY_GLOBLE,
-                                        COMPANY_GLOBLE_NAME,
-                                        GLOBLE_NAME,
-                                        LOG_SDATE)
-                SELECT TE.ID,
-                       TE.IS_CORP,
-                       TE.NO,
-                       TE.NAME,
-                       TE.ABBREVIATION,
-                       TE.REMARK,
-                       TE.TYPE,
-                       ''                                                                                   AS DISTRICT,
-                       ''                                                                                   AS COMPANY_NATURE,
-                       TE.COMPANY_TYPE,
-                       TE.COMPANY_ID,
-                       TE.ORG_TYPE,
-                       TE.DEPT_LEVEL,
-                       TE.DEPT_TYPE,
-                       TE.LEGAL,
-                       TE.TAXPAYER_NUMBER,
-                       TE.WEBSITE,
-                       TE.BUSINESS_ADDRESS,
-                       TE.BUSINESS_CAPITAL,
-                       ''                                                                                   AS AREA,
-                       ''                                                                                   AS A_CODE,
-                       TE.PROVINCE,
-                       TE.P_CODE,
-                       TE.CITY                                                                              AS CITY,
-                       TE.C_CODE                                                                            AS C_CODE,
-                       ''                                                                                   AS CTCPROVINCE,
-                       ''                                                                                   AS CTCAREA,
-                       ''                                                                                   AS CTCCITY,
-                       TR.LEAF                                                                              AS LEAF,
-                       TRUNCATE((LENGTH(tr.ancestors) - LENGTH(REPLACE(tr.ancestors, '，', ''))) / 3, 0) + 2 AS OLEVEL,
-                       TR.PARENT                                                                            AS PARENT,
-                       TE.WEIGHT                                                                            AS WEIGHT,
-                       TR.ANCESTORS                                                                         AS ANCESTORS,
-                       TE.FULL_PATH_ID                                                                      AS GLOBLE,
-                       TE.IS_DELETE                                                                         AS IS_DELETE,
-                       TE.YEAR                                                                              AS YEAR,
-                       TE.MONTH                                                                             AS MONTH,
-                       MO.ID                                                                                AS MSSID,
-                       MO.IDENTITY                                                                          AS MSSIDENTITY,
-                       MO.CODE                                                                              AS MSSCODE,
-                       MO.HRCODE                                                                            AS MSSHRCODE,
-                       MO.NAME                                                                              AS MSSNAME,
-                       MO.TYPE                                                                              AS MSSTYPE,
-                       MO.PARENTCOMPANYCODE                                                                 AS MSSPARENTCOMPANYCODE,
-                       MO.PARENTDEPARTMENTCODE                                                              AS MSSPARENTDEPARTMENTCODE,
-                       MO.STATUS                                                                            AS MSSSTATUS,
-                       ''                                                                                   AS MSSCHIEFLEADER,
-                       ''                                                                                   AS MSSDEPUTYLEADER,
-                       MO.COMPANYTYPE                                                                       AS MSSCOMPANYTYPE,
-                       ''                                                                                   AS MSSDEPARTMENTTYPE,
-                       ''                                                                                   AS MSSDEPARTMENTLEVEL,
-                       IF((LENGTH(TR.FULL_PATH_ID) - LENGTH(REPLACE(TR.FULL_PATH_ID, ',', ''))) / LENGTH(',') >= 2,
-                          SUBSTRING_INDEX(SUBSTRING_INDEX(TR.FULL_PATH_ID, ',', 3), ',', -1), NULL)         AS CODE_3,
-                       IF((LENGTH(TR.FULL_PATH_ID) - LENGTH(REPLACE(TR.FULL_PATH_ID, ',', ''))) / LENGTH(',') >= 3,
-                          SUBSTRING_INDEX(SUBSTRING_INDEX(TR.FULL_PATH_ID, ',', 4), ',', -1), NULL)         AS CODE_4,
-                       IF((LENGTH(TR.FULL_PATH_ID) - LENGTH(REPLACE(TR.FULL_PATH_ID, ',', ''))) / LENGTH(',') >= 4,
-                          SUBSTRING_INDEX(SUBSTRING_INDEX(TR.FULL_PATH_ID, ',', 5), ',', -1), NULL)         AS CODE_5,
-                       IF((LENGTH(TR.FULL_PATH_ID) - LENGTH(REPLACE(TR.FULL_PATH_ID, ',', ''))) / LENGTH(',') >= 5,
-                          SUBSTRING_INDEX(SUBSTRING_INDEX(TR.FULL_PATH_ID, ',', 6), ',', -1), NULL)         AS CODE_6,
-                       IF((LENGTH(TR.FULL_PATH_ID) - LENGTH(REPLACE(TR.FULL_PATH_ID, ',', ''))) / LENGTH(',') >= 6,
-                          SUBSTRING_INDEX(SUBSTRING_INDEX(TR.FULL_PATH_ID, ',', 7), ',', -1), NULL)         AS CODE_7,
-                       IF((LENGTH(TR.FULL_PATH_ID) - LENGTH(REPLACE(TR.FULL_PATH_ID, ',', ''))) / LENGTH(',') >= 7,
-                          SUBSTRING_INDEX(SUBSTRING_INDEX(TR.FULL_PATH_ID, ',', 8), ',', -1), NULL)         AS CODE_8,
-                       IF((LENGTH(TR.FULL_PATH_ID) - LENGTH(REPLACE(TR.FULL_PATH_ID, ',', ''))) / LENGTH(',') >= 8,
-                          SUBSTRING_INDEX(SUBSTRING_INDEX(TR.FULL_PATH_ID, ',', 9), '，', -1), NULL)         AS CODE_9,
-                       (SELECT COUNT(U.ID) FROM mc_user_ztk U WHERE U.ORG = TE.ID)                          AS DIRECTLY_NUM,
-                       0                                                                                    AS ATTACHED_NUM,
-                       TR.NAME                                                                              AS COMPANY_NAME,
-                       TR.FULL_PATH_ID                                                                      AS COMPANY_GLOBLE,
-                       TR.FULL_PATH_NAME                                                                    AS COMPANY_GLOBLE_NAME,
-                       TE.FULL_PATH_NAME                                                                    AS GLOBLE_NAME,
-                       DATE_FORMAT(NOW(), '%Y-%m-%d')                                                       AS LOG_SDATE
-                FROM d_telecom_org TE
-                         LEFT JOIN d_telecom_org_tree TR
-                                   ON TE.ID = TR.ID
-                         LEFT JOIN d_mss_org_mapping MOM
-                                   ON TE.ID = MOM.CODE
-                         LEFT JOIN d_mss_org MO
-                                   ON MOM.MSSCODE = MO.HRCODE AND MO.STATUS = '1'
-                WHERE TE.ID IN ({})
-                "#,
-                ids_to_insert
-                    .iter()
-                    .map(|_| "?")
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
-            let mut query = sqlx::query(&insert_select_sql);
+            // 4.1. 从 .sql 文件加载原始SQL
+            let raw_sql_query = sqlx::query_file!("queries/refresh_mc_org_show.sql");
+
+            // 4.2. 使用 QueryBuilder 附加动态的 WHERE IN 子句
+            let mut query_builder = QueryBuilder::new(raw_sql_query.sql());
+            query_builder.push(" WHERE TE.ID IN (");
+            let mut separated = query_builder.separated(", ");
             for id in &ids_to_insert {
-                query = query.bind(id);
+                separated.push_bind(id);
             }
-            let result = query.execute(tx.deref_mut()).await?;
-            info!("向 mc_org_show 插入了 {} 条新记录", result.rows_affected());
+            separated.push_unseparated(")");
+
+            // 4.3. 构建并执行最终的查询
+            let final_query = query_builder.build();
+            let result = final_query.execute(tx.deref_mut()).await?;
+
+            info!(
+                "Inserted {} new records into mc_org_show",
+                result.rows_affected()
+            );
         }
         // 5. 提交事务
         tx.commit().await?;
-        info!("mc_org_show 表刷新完成。");
+        info!("mc_org_show table refresh complete.");
 
         Ok(())
     }
@@ -932,9 +778,9 @@ impl OrgDataProcessor {
         }
         let result = query.execute(tx.deref_mut()).await?; // 修改这一行
         info!(
-            "在表 {} 中刪除了 {} 条记录",
-            table_name,
-            result.rows_affected()
+            "Deleted {} records in table {}",
+            result.rows_affected(),
+            table_name
         );
         Ok(())
     }
@@ -963,23 +809,15 @@ impl OrgDataProcessor {
                 // 注意：这里传递的是引用，避免不必要的 clone
                 let next_transition_result = match &current_state {
                     ProcessingState::Initial(log) => self.handle_initial_state(log.clone()).await,
-                    ProcessingState::GotTelecomOrg(log, org) => {
-                        self.handle_got_telecom_org_state(log.clone(), org.clone())
-                            .await
+                    ProcessingState::GotTelecomOrg(log, _) => {
+                        self.handle_got_telecom_org_state(log.clone()).await
                     }
-                    ProcessingState::GotOrgTree(log, org, tree) => {
-                        self.handle_got_org_tree_state(log.clone(), org.clone(), tree.clone())
-                            .await
+                    ProcessingState::GotOrgTree(log, _) => {
+                        self.handle_got_org_tree_state(log.clone()).await
                     }
-                    ProcessingState::GotMssMapping(log, org, tree, mapping, mss_code) => {
-                        self.handle_got_mss_mapping_state(
-                            log.clone(),
-                            org.clone(),
-                            tree.clone(),
-                            mapping.clone(),
-                            mss_code.clone(),
-                        )
-                        .await
+                    ProcessingState::GotMssMapping(log, _, mss_code) => {
+                        self.handle_got_mss_mapping_state(log.clone(), mss_code.clone())
+                            .await
                     }
                 };
 
@@ -1003,7 +841,7 @@ impl OrgDataProcessor {
                                     processed_data.telecom_orgs.push(org_to_insert);
                                 }
                             }
-                            ProcessingState::GotOrgTree(log, _, tree) => {
+                            ProcessingState::GotOrgTree(log, tree) => {
                                 // 从 GotTelecomOrg -> GotOrgTree，处理 tree
                                 let need_insert = log.type_ == 1 || log.type_ == 2;
                                 processed_data.org_tree_ids_to_delete.push(tree.id.clone());
@@ -1011,7 +849,7 @@ impl OrgDataProcessor {
                                     processed_data.telecom_org_trees.push(tree.clone());
                                 }
                             }
-                            ProcessingState::GotMssMapping(log, _, _, mapping, mss_code) => {
+                            ProcessingState::GotMssMapping(log, mapping, mss_code) => {
                                 // 从 GotOrgTree -> GotMssMapping，处理 mapping 和 mss_code
                                 let need_insert = log.type_ == 1 || log.type_ == 2;
                                 if let Some(code) = &mapping.code {
@@ -1034,7 +872,7 @@ impl OrgDataProcessor {
                         current_state = next_state;
                     }
                     // 所有步骤都已成功完成
-                    Ok(Transition::Completed(log, _, _, _, _, mss_orgs)) => {
+                    Ok(Transition::Completed(log, mss_orgs)) => {
                         // 处理最后一步 mss_orgs 的数据
                         let need_insert = log.type_ == 1 || log.type_ == 2;
                         if need_insert {
@@ -1072,8 +910,7 @@ impl OrgDataProcessor {
             }
         }
         info!(
-            "states_for_retry {:?} len: {}",
-            states_for_retry,
+            "states_for_retry: {states_for_retry:?} len: {}",
             states_for_retry.len()
         );
         (processed_data, states_for_retry, permanent_failures)
@@ -1090,7 +927,7 @@ impl OrgDataProcessor {
                 log, org,
             ))),
             None => Err(ProcessError::Permanent(anyhow::anyhow!(
-                "无法找到对应的 TelecomOrg"
+                "Unable to find corresponding TelecomOrg"
             ))),
         }
     }
@@ -1098,45 +935,39 @@ impl OrgDataProcessor {
     async fn handle_got_telecom_org_state(
         &self,
         log: ModifyOperationLog,
-        org: TelecomOrg,
     ) -> Result<Transition, ProcessError> {
         match self.transform_to_org_tree(&log).await? {
-            Some(tree) => Ok(Transition::Advanced(ProcessingState::GotOrgTree(
-                log, org, tree,
+            Some(tree) => Ok(Transition::Advanced(ProcessingState::GotOrgTree(log, tree))),
+            None => Err(ProcessError::Permanent(anyhow::anyhow!(
+                "Unable to generate OrgTree"
             ))),
-            None => Err(ProcessError::Permanent(anyhow::anyhow!("无法生成 OrgTree"))),
         }
     }
 
     async fn handle_got_org_tree_state(
         &self,
         log: ModifyOperationLog,
-        org: TelecomOrg,
-        tree: TelecomOrgTree,
     ) -> Result<Transition, ProcessError> {
         let (mapping, mss_code) = self.transform_to_mss_org_mapping(&log).await?;
         // 成功获取，返回 Advanced 状态
         Ok(Transition::Advanced(ProcessingState::GotMssMapping(
-            log, org, tree, mapping, mss_code,
+            log, mapping, mss_code,
         )))
     }
 
     async fn handle_got_mss_mapping_state(
         &self,
         log: ModifyOperationLog,
-        org: TelecomOrg,
-        tree: TelecomOrgTree,
-        mapping: TelecomMssOrgMapping,
         mss_code: String,
     ) -> Result<Transition, ProcessError> {
         let mss_orgs = self
             .transform_to_mss_orgs(&mss_code)
             .await?
-            .ok_or_else(|| ProcessError::Permanent(anyhow::anyhow!("无法找到 TelecomMssOrg")))?;
+            .ok_or_else(|| {
+                ProcessError::Permanent(anyhow::anyhow!("Unable to find TelecomMssOrg"))
+            })?;
 
         // 这是最后一步，成功后返回 Completed 状态，并携带所有数据
-        Ok(Transition::Completed(
-            log, org, tree, mapping, mss_code, mss_orgs,
-        ))
+        Ok(Transition::Completed(log, mss_orgs))
     }
 }
