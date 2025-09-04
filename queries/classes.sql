@@ -1,4 +1,4 @@
--- name: get_train_list
+-- name: get_class_list
 -- 获取培训列表
 SELECT a.ID                              AS _id,
        a.ID                              AS id,

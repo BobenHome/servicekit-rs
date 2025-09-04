@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{
     schedule::{
         CompositeTask, PsnArchivePushTask, PsnArchiveScPushTask, PsnLecturerPushTask,
-        PsnLecturerScPushTask, PsnTrainPushTask, PsnTrainScPushTask, PsnTrainingPushTask,
+        PsnLecturerScPushTask, PsnClassPushTask, PsnClassScPushTask, PsnTrainingPushTask,
         PsnTrainingScPushTask,
     },
     web::{models::ApiResponse, PushDataParams},
@@ -104,7 +104,7 @@ async fn process_push_tasks(
 
     let composite_tasks: Vec<Arc<dyn TaskExecutor + Send + Sync + 'static>> = if is_sichuan_data {
         vec![
-            Arc::new(PsnTrainScPushTask::new(
+            Arc::new(PsnClassScPushTask::new(
                 Arc::clone(&app_context),
                 hit_date.clone(),
                 train_ids.clone(),
@@ -127,7 +127,7 @@ async fn process_push_tasks(
         ]
     } else {
         vec![
-            Arc::new(PsnTrainPushTask::new(
+            Arc::new(PsnClassPushTask::new(
                 Arc::clone(&app_context),
                 hit_date.clone(),
                 train_ids.clone(),

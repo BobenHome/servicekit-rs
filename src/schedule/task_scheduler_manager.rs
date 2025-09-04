@@ -1,7 +1,7 @@
 use crate::{
     schedule::{
         CompositeTask, PsnArchivePushTask, PsnArchiveScPushTask, PsnLecturerPushTask,
-        PsnLecturerScPushTask, PsnTrainPushTask, PsnTrainScPushTask, PsnTrainingPushTask,
+        PsnLecturerScPushTask, PsnClassPushTask, PsnClassScPushTask, PsnTrainingPushTask,
         PsnTrainingScPushTask,
     },
     AppConfig, AppContext, TaskExecutor,
@@ -67,7 +67,7 @@ impl TaskSchedulerManager {
         app_context: Arc<AppContext>,
     ) -> Vec<Arc<dyn TaskExecutor + Send + Sync + 'static>> {
         vec![
-            Arc::new(PsnTrainPushTask::new(Arc::clone(&app_context), None, None)),
+            Arc::new(PsnClassPushTask::new(Arc::clone(&app_context), None, None)),
             Arc::new(PsnLecturerPushTask::new(
                 Arc::clone(&app_context),
                 None,
@@ -83,7 +83,7 @@ impl TaskSchedulerManager {
                 None,
                 None,
             )),
-            Arc::new(PsnTrainScPushTask::new(
+            Arc::new(PsnClassScPushTask::new(
                 Arc::clone(&app_context),
                 None,
                 None,

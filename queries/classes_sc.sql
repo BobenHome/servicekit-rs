@@ -1,4 +1,4 @@
--- name: get_train_sc_list
+-- name: get_class_sc_list
 -- 获取四川培训班列表
 SELECT a.ID                              AS _id,
        a.ID                              AS id,

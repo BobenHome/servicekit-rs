@@ -9,11 +9,11 @@ use anyhow::Result;
 use sqlx::{Execute, MySql, QueryBuilder};
 
 // 具体的任务结构体只包含 BasePsnPushTask 和它特有的数据
-pub struct PsnTrainPushTask {
+pub struct PsnClassPushTask {
     base: BasePsnPushTask, // <-- 嵌入 BasePsnPushTask
 }
 
-impl PsnDataWrapper for PsnTrainPushTask {
+impl PsnDataWrapper for PsnClassPushTask {
     type DataType = ClassData;
     fn wrap_data(data: Self::DataType) -> DynamicPsnData {
         DynamicPsnData::Class(data)
@@ -21,7 +21,7 @@ impl PsnDataWrapper for PsnTrainPushTask {
 
     fn get_query_builder(query_type: QueryType) -> QueryBuilder<'static, MySql> {
         // <-- 显式地将 sqlx::query_file! 的结果存入变量，再调用 .sql()
-        let raw_sql_query = sqlx::query_file!("queries/trains.sql");
+        let raw_sql_query = sqlx::query_file!("queries/classes.sql");
         let mut query_builder = QueryBuilder::<MySql>::new(raw_sql_query.sql());
 
         match query_type {
@@ -46,7 +46,7 @@ impl PsnDataWrapper for PsnTrainPushTask {
     }
 }
 
-impl PsnTrainPushTask {
+impl PsnClassPushTask {
     pub fn new(
         app_context: Arc<AppContext>,
         hit_date: Option<String>,
@@ -59,8 +59,8 @@ impl PsnTrainPushTask {
 }
 
 // 实现 TaskExecutor trait
-impl TaskExecutor for PsnTrainPushTask {
+impl TaskExecutor for PsnClassPushTask {
     fn execute(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
-        Box::pin(execute_push_task_logic::<PsnTrainPushTask>(&self.base))
+        Box::pin(execute_push_task_logic::<PsnClassPushTask>(&self.base))
     }
 }
