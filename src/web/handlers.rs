@@ -27,7 +27,7 @@ pub async fn push_mss(
     let app_context = Arc::clone(&app_context);
 
     tokio::spawn(async move {
-        info!("--------pxb mss pushByDate begin--------");
+        info!("----------------pxb mss pushByDate begin----------------");
 
         // 直接从 `body` 结构体中获取数据，不再需要额外的 `clone()`
         let begin_date_opt = &body.begin_date;
@@ -61,7 +61,7 @@ pub async fn push_mss(
             }
             // 遍历需要处理的每个日期
             for current_date in dates_to_process {
-                info!("=================={current_date} 开始处理=======================");
+                info!("--------{current_date} 开始处理--------");
                 process_push_tasks(
                     Arc::clone(&app_context),
                     Some(current_date.clone()),
@@ -69,10 +69,10 @@ pub async fn push_mss(
                     *is_sichuan_data,
                 )
                 .await;
-                info!("=================={current_date} 处理完成=======================");
+                info!("--------{current_date} 处理完成--------");
             }
         }
-        info!("--------pxb mss pushByDate end--------");
+        info!("----------------pxb mss pushByDate end----------------");
     });
 
     // 立即返回成功响应，因为处理是异步的

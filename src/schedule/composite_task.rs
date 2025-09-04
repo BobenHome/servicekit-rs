@@ -25,26 +25,20 @@ impl TaskExecutor for CompositeTask {
 
     fn execute(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>> {
         let tasks_clone = self.tasks.clone();
-        let task_name_clone = self.task_name.clone();
+        let task_name = self.task_name.clone();
 
         Box::pin(async move {
-            info!("--------任务 '{task_name_clone}' 开始。");
-            for (i, task) in tasks_clone.iter().enumerate() {
-                let current_task_name = format!(
-                    "子任务 {} #{} ({}的第{}个任务)",
-                    task.name(),
-                    i + 1,
-                    task_name_clone,
-                    i + 1
-                );
-                info!("  开始执行 {current_task_name}"); // 缩进表示子任务
-                if let Err(e) = task.execute().await {
-                    error!("  执行 {current_task_name} 异常: {e:?}");
-                } else {
-                    info!("  {current_task_name} 执行成功。");
+            let tasks_len = tasks_clone.len();
+            info!("Composite task '{task_name}' started. Containing {tasks_len} subtasks.");
+            for (idx, subtask) in tasks_clone.iter().enumerate() {
+                let sub_name = subtask.name();
+                info!("Starting subtask {}/{tasks_len}: '{sub_name}'.", idx + 1);
+                match subtask.execute().await {
+                    Ok(_) => info!("Subtask '{sub_name}' completed successfully."),
+                    Err(e) => error!("Subtask '{sub_name}' failed: {e:?}"),
                 }
             }
-            info!("--------任务 '{task_name_clone}' 结束。");
+            info!("Composite task '{task_name}' finished.");
             Ok(())
         })
     }
