@@ -128,14 +128,14 @@ impl PushResultParser {
                             "course_id" => {
                                 push_result.course_id = Some(id_val.to_string());
                                 push_result.train_id = obj
-                                    .get("training_id")
+                                    .get("trainingId")
                                     .and_then(Value::as_str)
                                     .map(ToString::to_string);
                             }
                             "user_id" => {
                                 push_result.user_id = Some(id_val.to_string());
                                 push_result.train_id = obj
-                                    .get("training_id")
+                                    .get("trainingId")
                                     .and_then(Value::as_str)
                                     .map(ToString::to_string);
                             }
