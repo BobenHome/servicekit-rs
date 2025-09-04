@@ -178,9 +178,9 @@ enum ProcessingState {
     // 初始状态，只有原始日志
     Initial(ModifyOperationLog),
     // 成功获取 TelecomOrg，保存下来
-    GotTelecomOrg(ModifyOperationLog, TelecomOrg),
+    GotTelecomOrg(ModifyOperationLog, Box<TelecomOrg>), // 将大的字段（如 TelecomOrg）包装在 Box 里，让枚举变体本身变得非常小，从而让整个枚举都变得小巧
     // 成功获取 OrgTree，保存之前的结果
-    GotOrgTree(ModifyOperationLog, TelecomOrgTree),
+    GotOrgTree(ModifyOperationLog, Box<TelecomOrgTree>),
     // 成功获取 MssMapping，保存之前的所有结果
     GotMssMapping(ModifyOperationLog, TelecomMssOrgMapping, String),
 }
@@ -194,9 +194,9 @@ struct PermanentFailure {
 // 表示状态转换的结果
 enum Transition {
     // 状态成功向前推进，这是新的状态
-    Advanced(ProcessingState),
+    Advanced(Box<ProcessingState>),
     // 所有步骤已成功完成，并携带最后一步获取的数据
-    Completed(ModifyOperationLog, Vec<TelecomMssOrg>),
+    Completed(Box<ModifyOperationLog>, Vec<TelecomMssOrg>),
 }
 
 pub struct OrgDataProcessor {
@@ -809,6 +809,7 @@ impl OrgDataProcessor {
                 // 注意：这里传递的是引用，避免不必要的 clone
                 let next_transition_result = match &current_state {
                     ProcessingState::Initial(log) => self.handle_initial_state(log.clone()).await,
+                    // 解构时，org 是 &Box<TelecomOrg> 类型
                     ProcessingState::GotTelecomOrg(log, _) => {
                         self.handle_got_telecom_org_state(log.clone()).await
                     }
@@ -823,15 +824,19 @@ impl OrgDataProcessor {
 
                 match next_transition_result {
                     // 状态成功推进
-                    Ok(Transition::Advanced(next_state)) => {
+                    Ok(Transition::Advanced(next_state_box)) => {
+                        // next_state_box 是 Box<ProcessingState>
                         // 核心逻辑：立即处理上一个状态的数据
-                        match &next_state {
+                        match &*next_state_box {
+                            // 使用 * 解引用 Box
                             ProcessingState::GotTelecomOrg(log, org) => {
                                 // 从 Initial -> GotTelecomOrg，处理 org
                                 let need_insert = log.type_ == 1 || log.type_ == 2;
+                                // org 是 &Box<TelecomOrg>，使用 .id 会自动解引用
                                 processed_data.org_ids_to_delete.push(org.id.clone());
                                 if need_insert {
-                                    let mut org_to_insert = org.clone();
+                                    // (**org) 从 &Box<T> 得到 T
+                                    let mut org_to_insert = (**org).clone();
                                     org_to_insert.year = Some(year.clone());
                                     org_to_insert.month = Some(month.clone());
                                     org_to_insert.in_time = Some(now);
@@ -846,7 +851,7 @@ impl OrgDataProcessor {
                                 let need_insert = log.type_ == 1 || log.type_ == 2;
                                 processed_data.org_tree_ids_to_delete.push(tree.id.clone());
                                 if need_insert {
-                                    processed_data.telecom_org_trees.push(tree.clone());
+                                    processed_data.telecom_org_trees.push((**tree).clone());
                                 }
                             }
                             ProcessingState::GotMssMapping(log, mapping, mss_code) => {
@@ -869,7 +874,8 @@ impl OrgDataProcessor {
                             _ => {}
                         }
                         // 更新状态，继续循环
-                        current_state = next_state;
+                        // 更新状态，从 Box 中移出值
+                        current_state = *next_state_box;
                     }
                     // 所有步骤都已成功完成
                     Ok(Transition::Completed(log, mss_orgs)) => {
@@ -923,8 +929,8 @@ impl OrgDataProcessor {
     ) -> Result<Transition, ProcessError> {
         match self.transform_to_telecom_org(&log).await? {
             // 成功获取，返回 Advanced 状态
-            Some(org) => Ok(Transition::Advanced(ProcessingState::GotTelecomOrg(
-                log, org,
+            Some(org) => Ok(Transition::Advanced(Box::new(
+                ProcessingState::GotTelecomOrg(log, Box::new(org)),
             ))),
             None => Err(ProcessError::Permanent(anyhow::anyhow!(
                 "Unable to find corresponding TelecomOrg"
@@ -937,7 +943,10 @@ impl OrgDataProcessor {
         log: ModifyOperationLog,
     ) -> Result<Transition, ProcessError> {
         match self.transform_to_org_tree(&log).await? {
-            Some(tree) => Ok(Transition::Advanced(ProcessingState::GotOrgTree(log, tree))),
+            Some(tree) => Ok(Transition::Advanced(Box::new(ProcessingState::GotOrgTree(
+                log,
+                Box::new(tree),
+            )))),
             None => Err(ProcessError::Permanent(anyhow::anyhow!(
                 "Unable to generate OrgTree"
             ))),
@@ -950,8 +959,8 @@ impl OrgDataProcessor {
     ) -> Result<Transition, ProcessError> {
         let (mapping, mss_code) = self.transform_to_mss_org_mapping(&log).await?;
         // 成功获取，返回 Advanced 状态
-        Ok(Transition::Advanced(ProcessingState::GotMssMapping(
-            log, mapping, mss_code,
+        Ok(Transition::Advanced(Box::new(
+            ProcessingState::GotMssMapping(log, mapping, mss_code),
         )))
     }
 
@@ -968,6 +977,6 @@ impl OrgDataProcessor {
             })?;
 
         // 这是最后一步，成功后返回 Completed 状态，并携带所有数据
-        Ok(Transition::Completed(log, mss_orgs))
+        Ok(Transition::Completed(Box::new(log), mss_orgs))
     }
 }

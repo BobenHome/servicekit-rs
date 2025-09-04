@@ -119,7 +119,7 @@ impl BinlogSyncTimestampHolder {
 
     /// 获取锁
     async fn acquire_lock(&self) -> Result<bool> {
-        match RedisLock::try_acquire(&self.redis_mgr, BINLOG_SYNC_LOCK_KEY, 14400_000).await? {
+        match RedisLock::try_acquire(&self.redis_mgr, BINLOG_SYNC_LOCK_KEY, 14_400_000).await? {
             Some(lock) => {
                 // 成功获取锁，将lock存入 holder，在以后释放
                 let mut guard = self.lock_holder.lock().await;
@@ -254,27 +254,22 @@ impl BinlogSyncTask {
                 let mut current_page = None;
                 let mut all_items_for_type = Vec::new();
                 // 1. 首先，获取当前类型的所有分页数据
-                loop {
-                    match self
-                        .app_context
-                        .gateway_client
-                        .binlog_find(*data_type, start_time, end_time, current_page)
-                        .await?
-                    {
-                        Some(result_set) => {
-                            // 处理当前页的数据
-                            if let Some(mut items) = result_set.items {
-                                // 处理日志项
-                                all_items_for_type.append(&mut items);
-                            }
-                            // 检查是否还有下一页
-                            if !result_set.page.has_next_page() {
-                                break;
-                            }
-                            current_page = Some(result_set.page.next_page());
-                        }
-                        None => break,
+                while let Some(result_set) = self
+                    .app_context
+                    .gateway_client
+                    .binlog_find(*data_type, start_time, end_time, current_page)
+                    .await?
+                {
+                    // 处理当前页的数据
+                    if let Some(mut items) = result_set.items {
+                        // 处理日志项
+                        all_items_for_type.append(&mut items);
                     }
+                    // 检查是否还有下一页
+                    if !result_set.page.has_next_page() {
+                        break;
+                    }
+                    current_page = Some(result_set.page.next_page());
                 }
                 // 2. 获取完所有数据后，根据类型分发给对应的处理器
                 if !all_items_for_type.is_empty() {
