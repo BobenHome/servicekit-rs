@@ -1,13 +1,17 @@
+use crate::config::TasksConfig;
+use crate::schedule::binlog_sync::BinlogSyncTask;
 use crate::{
     schedule::{
-        CompositeTask, PsnArchivePushTask, PsnArchiveScPushTask, PsnLecturerPushTask,
-        PsnLecturerScPushTask, PsnClassPushTask, PsnClassScPushTask, PsnTrainingPushTask,
+        CompositeTask, PsnArchivePushTask, PsnArchiveScPushTask, PsnClassPushTask,
+        PsnClassScPushTask, PsnLecturerPushTask, PsnLecturerScPushTask, PsnTrainingPushTask,
         PsnTrainingScPushTask,
     },
-    AppConfig, AppContext, TaskExecutor,
+    AppContext, TaskExecutor,
 };
 use anyhow::{Context, Result};
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::sleep;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{error, info};
 
@@ -39,67 +43,66 @@ impl TaskSchedulerManager {
     pub async fn initialize_tasks(
         &self,
         app_context: Arc<AppContext>,
-        app_config: &AppConfig,
+        tasks_config: &TasksConfig,
     ) -> Result<()> {
         // 创建所有推送任务实例
-        let tasks = self.create_push_tasks(app_context);
+        let tasks = self.create_push_tasks(&app_context);
 
         // 创建复合任务
         let composite_task = Arc::new(CompositeTask::new(
             tasks,
-            app_config.tasks.psn_push.task_name.clone(),
+            tasks_config.psn_push.task_name.clone(),
         ));
 
         // 使用辅助函数创建并添加 CompositeTask 的 Cron Job
         // 添加到调度器
         self.create_schedule_job(
             composite_task, // Arc<CompositeTask> 会自动转换为 Arc<dyn TaskExecutor>
-            app_config.tasks.psn_push.cron_schedule.as_str(),
+            tasks_config.psn_push.cron_schedule.as_str(),
             vec![],
         )
         .await?;
+
+        // --- 连续任务 ---
+        // 1. 创建 BinlogSyncTask 实例
+        let binlog_task = Arc::new(BinlogSyncTask::new(Arc::clone(&app_context)));
+
+        // 2. 将其作为连续任务启动，而不是 Cron Job
+        self.run_continuous_task(binlog_task).await;
 
         Ok(())
     }
 
     fn create_push_tasks(
         &self,
-        app_context: Arc<AppContext>,
+        app_context: &Arc<AppContext>,
     ) -> Vec<Arc<dyn TaskExecutor + Send + Sync + 'static>> {
         vec![
-            Arc::new(PsnClassPushTask::new(Arc::clone(&app_context), None, None)),
+            Arc::new(PsnClassPushTask::new(Arc::clone(app_context), None, None)),
             Arc::new(PsnLecturerPushTask::new(
-                Arc::clone(&app_context),
+                Arc::clone(app_context),
                 None,
                 None,
             )),
-            Arc::new(PsnArchivePushTask::new(
-                Arc::clone(&app_context),
-                None,
-                None,
-            )),
+            Arc::new(PsnArchivePushTask::new(Arc::clone(app_context), None, None)),
             Arc::new(PsnTrainingPushTask::new(
-                Arc::clone(&app_context),
+                Arc::clone(app_context),
                 None,
                 None,
             )),
-            Arc::new(PsnClassScPushTask::new(
-                Arc::clone(&app_context),
-                None,
-                None,
-            )),
+            Arc::new(PsnClassScPushTask::new(Arc::clone(app_context), None, None)),
             Arc::new(PsnLecturerScPushTask::new(
-                Arc::clone(&app_context),
+                Arc::clone(app_context),
                 None,
                 None,
             )),
             Arc::new(PsnArchiveScPushTask::new(
-                Arc::clone(&app_context),
+                Arc::clone(app_context),
                 None,
                 None,
             )),
             Arc::new(PsnTrainingScPushTask::new(
-                Arc::clone(&app_context),
+                Arc::clone(app_context),
                 None,
                 None,
             )),
@@ -146,6 +149,27 @@ impl TaskSchedulerManager {
         info!("Job '{job_name}' added to scheduler.");
 
         Ok(())
+    }
+
+    /// 启动一个在后台持续运行的任务
+    async fn run_continuous_task(&self, task: Arc<dyn TaskExecutor + Send + Sync + 'static>) {
+        let task_name = task.name().to_string();
+        info!("Spawning continuous task '{task_name}' to run in the background.");
+
+        tokio::spawn(async move {
+            loop {
+                info!("Starting a new cycle for continuous task '{task_name}'.");
+                if let Err(e) = task.execute().await {
+                    error!("Continuous task '{task_name}' failed: {e:?}. Waiting for 10 seconds before next cycle.");
+                    // 如果任务失败，等待一段时间再重试，避免因连续失败导致CPU空转或频繁攻击下游服务
+                    sleep(Duration::from_secs(10)).await;
+                } else {
+                    info!("Continuous task '{task_name}' completed a cycle successfully.");
+                    //  成功后短暂休眠，避免对数据库或API造成过大压力
+                    sleep(Duration::from_secs(1)).await;
+                }
+            }
+        });
     }
 
     async fn execute_dependent_tasks(

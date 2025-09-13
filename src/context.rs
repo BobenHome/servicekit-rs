@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::config::{MssInfoConfig, RedisConfig, TelecomConfig};
@@ -19,6 +20,7 @@ pub struct AppContext {
     pub gateway_client: Arc<GatewayClient>,
     pub clickhouse_client: Arc<ClickHouseClient>,
     pub redis_mgr: RedisMgr,
+    pub provinces: Arc<HashMap<String, String>>,
 }
 
 impl AppContext {
@@ -28,6 +30,7 @@ impl AppContext {
         telecom_config: Arc<TelecomConfig>,
         clickhouse_config: Arc<ClickhouseConfig>,
         redis_config: Arc<RedisConfig>,
+        provinces: HashMap<String, String>,
     ) -> Result<Self> {
         // --- Initialize MYSQL POOL ---
         let mysql_pool = mysql_pool::create_mysql_pool(database_url)
@@ -68,6 +71,7 @@ impl AppContext {
             gateway_client,
             clickhouse_client,
             redis_mgr,
+            provinces: Arc::new(provinces),
         })
     }
 }

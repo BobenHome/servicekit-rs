@@ -5,11 +5,23 @@ use crate::AppContext;
 use anyhow::Result;
 use chrono::{Local, NaiveDateTime};
 use itertools::Itertools; // 使用 itertools::Itertools::unique_by 来去重
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sqlx::{Execute, MySql, QueryBuilder, Transaction};
 use std::ops::DerefMut;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tracing::{error, info};
+
+// 定义静态Regex（全局或模块级，确保只编译一次）
+static CITY_CLEAN_RE: OnceLock<Regex> = OnceLock::new();
+
+fn get_city_clean_re() -> &'static Regex {
+    CITY_CLEAN_RE.get_or_init(|| {
+        Regex::new(r"(分公司|电信分公司\*|中国电信股份有限公司|市|分公司\*|中国电信)").unwrap()
+    })
+}
+// 浙江特殊情况，第6个元素还是浙江，要取第7个元素
+const SPECIAL_CITY_MARKER: &str = "4843217f-e083-44a4-adc3-c85f25448af8";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelecomOrg {
@@ -60,7 +72,7 @@ pub struct ContactInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DepartmentInfo {
-    pub dept_seq: String,
+    pub dept_seq: Option<String>,
     pub org_type: Option<String>,
     pub dept_level: Option<String>,
     pub dept_type: Option<String>,
@@ -128,6 +140,12 @@ pub struct TelecomMssOrg {
     #[serde(rename = "departmentType")]
     pub department_type: Option<String>,
     pub time: Option<i64>,
+    #[serde(rename = "chiefLeader")]
+    pub chief_leader: Option<String>,
+    #[serde(rename = "deputyLeader")]
+    pub deputy_leader: Option<String>,
+    #[serde(rename = "departmentLevel")]
+    pub department_level: Option<String>,
     #[serde(rename = "hitDate")]
     pub hit_date: Option<String>,
     pub year: Option<String>,
@@ -500,6 +518,10 @@ impl OrgDataProcessor {
             company_type,
             company_id,
             org_type,
+            C_CODE,
+            PROVINCE,
+            P_CODE,
+            CITY,
             weight,
             is_corp,
             id,
@@ -529,6 +551,51 @@ impl OrgDataProcessor {
             let is_delete_str = org.is_delete.map(|b| b.to_string());
             let delete_str = org.delete.map(|b| b.to_string());
 
+            let cleaned_name = org.name.map(|n| n.trim().replace('\u{200b}', ""));
+
+            let mut p_code: Option<String> = None;
+            let mut province_name: Option<String> = None;
+            let mut c_code: Option<String> = None;
+            let mut city_index: usize = 5; // 默认取第6个元素（索引5）
+
+            if let Some(path) = &org.full_path_id {
+                let parts: Vec<&str> = path.split(',').collect();
+                // 提取 省份ID (P_CODE)，它是路径中的第5个元素 (索引为4)
+                if let Some(province_id_str) = parts.get(4) {
+                    // 查找省份名称
+                    province_name = self.app_context.provinces.get(*province_id_str).cloned();
+                    p_code = Some(province_id_str.to_string());
+                }
+
+                // 决定用于城市的索引，并提取 c_code
+                match parts.get(5) {
+                    Some(candidate) if *candidate == SPECIAL_CITY_MARKER => {
+                        // 特殊标记：尝试使用索引6作为真正的城市 code
+                        city_index = 6;
+                        c_code = parts.get(6).map(|s| s.to_string());
+                    }
+                    Some(candidate) => {
+                        city_index = 5;
+                        c_code = Some(candidate.to_string());
+                    }
+                    None => {
+                        // 索引5不存在，保持默认 city_index = 5，c_code = None
+                        c_code = None;
+                    }
+                }
+            }
+
+            let city_name = org
+                .full_path_name
+                .as_ref()
+                .map(|path| {
+                    let parts: Vec<&str> = path.split('-').collect();
+                    parts
+                        .get(city_index)
+                        .map(|s| get_city_clean_re().replace_all(s.trim(), "").to_string())
+                })
+                .flatten();
+
             let department_info_is_close = org
                 .department_info
                 .as_ref()
@@ -546,7 +613,7 @@ impl OrgDataProcessor {
                 )
                 .push_bind(department_info_is_close)
                 .push_bind(department_info_is_cancel)
-                .push_bind(org.name)
+                .push_bind(cleaned_name)
                 .push_bind(
                     org.company_info
                         .as_ref()
@@ -565,6 +632,10 @@ impl OrgDataProcessor {
                         .map(|c| c.org_type.clone())
                         .unwrap_or_default(),
                 )
+                .push_bind(c_code)
+                .push_bind(province_name)
+                .push_bind(p_code)
+                .push_bind(city_name)
                 .push_bind(org.weight)
                 .push_bind(is_corp_str)
                 .push_bind(org.id)
@@ -978,5 +1049,18 @@ impl OrgDataProcessor {
 
         // 这是最后一步，成功后返回 Completed 状态，并携带所有数据
         Ok(Transition::Completed(Box::new(log), mss_orgs))
+    }
+}
+
+#[test]
+fn test_city_clean() {
+    let inputs = [
+        ("盐城分公司 ", "盐城"),
+        ("中国电信股份有限公司 新乡分公司", "新乡"),
+        ("晋城市 电信分公司* ", "晋城"),
+    ];
+    for (input, expected) in inputs {
+        let cleaned = get_city_clean_re().replace_all(input, "").to_string();
+        assert_eq!(cleaned, expected);
     }
 }
