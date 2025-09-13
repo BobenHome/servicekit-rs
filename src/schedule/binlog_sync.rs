@@ -119,7 +119,8 @@ impl BinlogSyncTimestampHolder {
 
     /// 获取锁
     async fn acquire_lock(&self) -> Result<bool> {
-        match RedisLock::try_acquire(&self.redis_mgr, BINLOG_SYNC_LOCK_KEY, 14_400_000).await? {
+        // 设置1小时后锁失效，4小时太长
+        match RedisLock::try_acquire(&self.redis_mgr, BINLOG_SYNC_LOCK_KEY, 3_600_000).await? {
             Some(lock) => {
                 // 成功获取锁，将lock存入 holder，在以后释放
                 let mut guard = self.lock_holder.lock().await;
@@ -182,19 +183,23 @@ impl BinlogSyncTimestampHolder {
         // 1. 先尝试获取锁
         if !self.acquire_lock().await? {
             // 如果获取锁失败，直接返回，不再执行后续逻辑
+            warn!("Current task acquire lock is not acquired.");
             return Ok(());
         }
 
-        // 2. 成功获取锁后，再获取时间戳
-        let start_timestamp = self.get_timestamp().await?;
+        // 2. 将所有获取锁之后的操作，全部放入一个新的 async 块中
+        let protected_logic = async {
+            // 2.1. 在安全区域内获取时间戳
+            let start_timestamp = self.get_timestamp().await?;
+            // 2.2. 执行传入的业务逻辑
+            operation(start_timestamp).await
+        };
 
-        // 2. 将业务逻辑（Future）包装在 AssertUnwindSafe 和 catch_unwind 中
+        // 3. 将业务逻辑（Future）包装在 AssertUnwindSafe 和 catch_unwind 中
         // AssertUnwindSafe 是必要的，因为我们跨越了 panic 边界
-        let future_result = AssertUnwindSafe(operation(start_timestamp))
-            .catch_unwind()
-            .await;
+        let future_result = AssertUnwindSafe(protected_logic).catch_unwind().await;
 
-        // 3. 根据执行结果进行处理
+        // 4. 根据执行结果进行处理
         match future_result {
             // 1: 业务逻辑成功完成，且返回 Ok(end_time)
             Ok(Ok(end_time)) => {
@@ -243,7 +248,7 @@ impl BinlogSyncTask {
         // 一个业务逻辑的闭包
         let business_logic = |timestamp: i64| async move {
             info!("Executing sync logic with start_timestamp: {}", timestamp);
-            let start_time = timestamp; // - 30_000; // 30 秒前
+            let start_time = timestamp - 30_000; // 30 秒前
             let end_time = std::cmp::min(
                 timestamp + 300_000,                   // 5 分钟后
                 chrono::Utc::now().timestamp_millis(), // 时间戳全球统一不区分时区
@@ -303,7 +308,7 @@ impl BinlogSyncTask {
 impl TaskExecutor for BinlogSyncTask {
     fn execute(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         Box::pin(async move {
-            info!("Starting binlog sync task...");
+            info!("Starting binlog sync task.");
             // Execute Binlog sync
             if let Err(e) = self.sync_data().await {
                 error!("Failed to sync organization data: {e:?}");
