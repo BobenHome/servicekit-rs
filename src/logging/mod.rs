@@ -195,7 +195,7 @@ pub fn init_logging() -> Result<()> {
         .with_line_number(true)
         .with_file(true)
         .with_level(true)
-        .with_filter(EnvFilter::new("info")); // 文件日志通常使用 info 级别
+        .with_filter(EnvFilter::new("debug")); // 文件日志通常使用 info 级别
 
     // 3. 创建一个 fmt 层用于控制台输出
     let stdout_layer = fmt::layer()

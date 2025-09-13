@@ -21,6 +21,7 @@ async fn main() -> Result<()> {
         Arc::clone(&app_config.telecom_config),
         Arc::clone(&app_config.clickhouse_config),
         Arc::clone(&app_config.redis_config),
+        app_config.provinces,
     )
     .await?;
     let app_context_arc = Arc::new(app_context);
@@ -28,7 +29,7 @@ async fn main() -> Result<()> {
     // 4. 初始化和启动任务调度器
     let scheduler = TaskSchedulerManager::new().await?;
     scheduler
-        .initialize_tasks(Arc::clone(&app_context_arc), &app_config)
+        .initialize_tasks(Arc::clone(&app_context_arc), &app_config.tasks)
         .await?;
     scheduler.start().await;
 

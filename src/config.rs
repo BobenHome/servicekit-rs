@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -15,24 +16,18 @@ pub struct AppConfig {
     pub clickhouse_config: Arc<ClickhouseConfig>, // ClickHouse配置
     #[serde(skip)]
     pub redis_config: Arc<RedisConfig>,
+    pub provinces: HashMap<String, String>, // 省份配置
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct TasksConfig {
     pub psn_push: PsnPushTaskConfig,
-    pub binlog_sync: BinlogSyncTaskConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct PsnPushTaskConfig {
     pub cron_schedule: String,
     pub task_name: String, // 任务名称
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct BinlogSyncTaskConfig {
-    pub cron_schedule: String,
-    pub task_name: String,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -77,6 +72,7 @@ struct RawAppConfig {
     pub telecom_config: TelecomConfig,
     pub clickhouse_config: ClickhouseConfig,
     pub redis_config: RedisConfig,
+    provinces: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -101,6 +97,7 @@ impl AppConfig {
             telecom_config: Arc::new(raw_config.telecom_config),
             clickhouse_config: Arc::new(raw_config.clickhouse_config),
             redis_config: Arc::new(raw_config.redis_config),
+            provinces: raw_config.provinces,
         })
     }
 }

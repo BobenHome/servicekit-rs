@@ -42,15 +42,15 @@ async fn test_invoke_gateway_service_real_success() -> Result<()> {
     setup_logging_for_tests();
     // 2. 加载应用程序配置
     let app_config = AppConfig::new().context("Failed to load application configuration")?;
-    let app_config_arc = Arc::new(app_config);
 
     // 3. 创建AppContext实例
     let app_context = AppContext::new(
-        &app_config_arc.database_url,
-        Arc::clone(&app_config_arc.mss_info_config),
-        Arc::clone(&app_config_arc.telecom_config),
-        Arc::clone(&app_config_arc.clickhouse_config),
-        Arc::clone(&app_config_arc.redis_config),
+        &app_config.database_url,
+        Arc::clone(&app_config.mss_info_config),
+        Arc::clone(&app_config.telecom_config),
+        Arc::clone(&app_config.clickhouse_config),
+        Arc::clone(&app_config.redis_config),
+        app_config.provinces,
     )
     .await?;
     let app_context_arc = Arc::new(app_context);
@@ -86,14 +86,15 @@ async fn test_redislock_concurrent_acquire_and_release() -> Result<()> {
     // 日志、配置、AppContext 初始化（按你项目里已有代码）
     setup_logging_for_tests();
     let app_config = AppConfig::new().context("Failed to load application configuration")?;
-    let app_config_arc = Arc::new(app_config);
+    // let app_config_arc = Arc::new(app_config);
 
     let app_context = AppContext::new(
-        &app_config_arc.database_url,
-        Arc::clone(&app_config_arc.mss_info_config),
-        Arc::clone(&app_config_arc.telecom_config),
-        Arc::clone(&app_config_arc.clickhouse_config),
-        Arc::clone(&app_config_arc.redis_config),
+        &app_config.database_url,
+        Arc::clone(&app_config.mss_info_config),
+        Arc::clone(&app_config.telecom_config),
+        Arc::clone(&app_config.clickhouse_config),
+        Arc::clone(&app_config.redis_config),
+        app_config.provinces,
     )
     .await?;
     let app_context_arc = Arc::new(app_context);
@@ -121,7 +122,7 @@ async fn test_redislock_concurrent_acquire_and_release() -> Result<()> {
 
     // 第二轮并发再试一次，验证锁释放后可被重新获取
     let got2 = run_concurrent_try_once(redis_mgr.clone(), lock_key, 5, 200).await;
-    tracing::info!("Round2 acquired by tasks: {:?}", got2);
+    tracing::info!("Round2 acquired by tasks: {got2:?}");
     assert_eq!(got2.len(), 1, "Expected exactly 1 holder in round2");
 
     // 清理

@@ -312,10 +312,9 @@ impl GatewayClient {
         }
 
         match &reply_buffer.body.payload {
-            Value::Object(payload_obj) => {
-                let parse_result = serde_json::from_value::<Vec<TelecomMssOrg>>(Value::Object(
-                    payload_obj.clone(),
-                ));
+            Value::Array(arr) => {
+                let parse_result =
+                    serde_json::from_value::<Vec<TelecomMssOrg>>(Value::Array(arr.clone()));
                 match parse_result {
                     Result::Ok(vec_telecom_mss_org) => Ok(Some(vec_telecom_mss_org)),
                     Err(e) => {
