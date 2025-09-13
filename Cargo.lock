@@ -2665,7 +2665,7 @@ dependencies = [
  "itertools",
  "log",
  "redis",
-    "regex",
+ "regex",
  "reqwest",
  "rust_decimal",
  "serde",
