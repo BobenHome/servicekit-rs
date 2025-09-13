@@ -175,10 +175,10 @@ impl BinlogSyncTimestampHolder {
     /// 接收一个异步闭包，安全地执行它，并确保锁总是被释放。
     pub async fn run_scoped_sync<F, Fut>(&self, operation: F) -> Result<()>
     where
-    // 闭包接收 i64 (start_time)，返回一个 Future
+        // 闭包接收 i64 (start_time)，返回一个 Future
         F: FnOnce(i64) -> Fut,
-    // Future 的输出是 Result<i64>，其中 i64 是新的 end_time
-        Fut: Future<Output=Result<i64>>,
+        // Future 的输出是 Result<i64>，其中 i64 是新的 end_time
+        Fut: Future<Output = Result<i64>>,
     {
         // 1. 先尝试获取锁
         if !self.acquire_lock().await? {
