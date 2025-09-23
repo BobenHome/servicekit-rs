@@ -1,6 +1,6 @@
-use crate::schedule::binlog_sync::{EntityMetaInfo, ModifyOperationLog};
-use crate::utils::MapToProcessError;
+use crate::schedule::binlog_sync::{EntityMetaInfo, ModifyOperationLog, PermanentFailure};
 use crate::utils::ProcessError;
+use crate::utils::{mysql_client, MapToProcessError};
 use crate::AppContext;
 use anyhow::Result;
 use chrono::{Local, NaiveDateTime};
@@ -190,7 +190,7 @@ impl ProcessedOrgData {
 // 最大重试次数
 const MAX_RETRIES: u32 = 3;
 
-// 2. 定义处理状态机，用于保存每个日志的处理进度
+// 定义处理状态机，用于保存每个日志的处理进度
 #[derive(Debug)]
 enum ProcessingState {
     // 初始状态，只有原始日志
@@ -201,12 +201,6 @@ enum ProcessingState {
     GotOrgTree(ModifyOperationLog, Box<TelecomOrgTree>),
     // 成功获取 MssMapping，保存之前的所有结果
     GotMssMapping(ModifyOperationLog, TelecomMssOrgMapping, String),
-}
-
-// 用于记录永久失败的日志和原因
-struct PermanentFailure {
-    log: ModifyOperationLog,
-    reason: String,
 }
 
 // 表示状态转换的结果
@@ -254,7 +248,7 @@ impl OrgDataProcessor {
             if !permanent_failures.is_empty() {
                 for failure in permanent_failures {
                     error!(
-                        "Processing permanently failed, will not retry. Reason: {}. Log: {:?}",
+                        "Processing organization permanently failed, will not retry. Reason: {}. Log: {:?}",
                         failure.reason, failure.log
                     );
                 }
@@ -287,24 +281,23 @@ impl OrgDataProcessor {
     async fn save_processed_data(&self, data: &ProcessedOrgData) -> Result<()> {
         let mut tx = self.app_context.mysql_pool.begin().await?;
         // --- 1. 执行批量刪除 ---
-        info!("Starting batch deletion of old data...");
-        self.batch_delete(&mut tx, "d_telecom_org", "id", &data.org_ids_to_delete)
-            .await?;
-        self.batch_delete(
+        info!("Starting batch deletion organization of old data...");
+        mysql_client::batch_delete(&mut tx, "d_telecom_org", "id", &data.org_ids_to_delete).await?;
+        mysql_client::batch_delete(
             &mut tx,
             "d_telecom_org_tree",
             "id",
             &data.org_tree_ids_to_delete,
         )
         .await?;
-        self.batch_delete(
+        mysql_client::batch_delete(
             &mut tx,
             "d_mss_org_mapping",
             "code",
             &data.org_mapping_codes_to_delete,
         )
         .await?;
-        self.batch_delete(
+        mysql_client::batch_delete(
             &mut tx,
             "d_mss_org",
             "hrcode",
@@ -388,8 +381,7 @@ impl OrgDataProcessor {
         let mut tx = self.app_context.mysql_pool.begin().await?;
 
         // 3. (Delete) 先从 mc_org_show 中删除所有受影响的记录
-        self.batch_delete(&mut tx, "mc_org_show", "ID", &unique_affected_ids)
-            .await?;
+        mysql_client::batch_delete(&mut tx, "mc_org_show", "ID", &unique_affected_ids).await?;
 
         // 4. (Insert) 重新计算并插入需要存在的数据
         //    只为那些需要新增或更新的组织（即存在于 telecom_orgs 列表中的）执行插入
@@ -474,10 +466,7 @@ impl OrgDataProcessor {
 
         // 3. 处理逻辑错误：如果 API 调用成功但没有返回数据，这是一个永久性错误
         let mapping = mapping_option.ok_or_else(|| {
-            ProcessError::Permanent(anyhow::anyhow!(
-                "MSS organization not found for CID: {}",
-                cid
-            ))
+            ProcessError::Permanent(anyhow::anyhow!("MSS organization not found for CID: {cid}",))
         })?;
 
         // 4. 处理逻辑错误：如果返回的数据缺少必要的 mss_code 字段，这也是一个永久性错误
@@ -821,38 +810,6 @@ impl OrgDataProcessor {
         });
         let query = query_builder.build();
         query.execute(&mut **tx).await?;
-        Ok(())
-    }
-
-    async fn batch_delete(
-        &self,
-        tx: &mut Transaction<'_, MySql>,
-        table_name: &str,
-        key_name: &str,
-        ids: &[String],
-    ) -> Result<()> {
-        if ids.is_empty() {
-            return Ok(());
-        }
-        // 对 ID 进行去重
-        let unique_ids: Vec<_> = ids.iter().unique().collect();
-        // 构建 `DELETE FROM table WHERE id IN (?, ?, ...)` 查詢
-        let query_str = format!(
-            "DELETE FROM {} WHERE {} IN ({})",
-            table_name,
-            key_name,
-            unique_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",")
-        );
-        let mut query = sqlx::query(&query_str);
-        for id in unique_ids {
-            query = query.bind(id);
-        }
-        let result = query.execute(tx.deref_mut()).await?; // 修改这一行
-        info!(
-            "Deleted {} records in table {}",
-            result.rows_affected(),
-            table_name
-        );
         Ok(())
     }
 

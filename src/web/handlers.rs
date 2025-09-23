@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::{
     schedule::{
-        CompositeTask, PsnArchivePushTask, PsnArchiveScPushTask, PsnLecturerPushTask,
-        PsnLecturerScPushTask, PsnClassPushTask, PsnClassScPushTask, PsnTrainingPushTask,
+        CompositeTask, PsnArchivePushTask, PsnArchiveScPushTask, PsnClassPushTask,
+        PsnClassScPushTask, PsnLecturerPushTask, PsnLecturerScPushTask, PsnTrainingPushTask,
         PsnTrainingScPushTask,
     },
     web::{models::ApiResponse, PushDataParams},

@@ -11,7 +11,10 @@ use crate::{config::TelecomConfig, schedule::binlog_sync::ResultSet};
 use super::gateway_types::{
     Destination, MessageHeader, ServiceMessage, ServiceMessageBody, ServiceMessageReplyBuffer,
 };
-use crate::binlog::{TelecomMssOrg, TelecomMssOrgMapping, TelecomOrg, TelecomOrgTree};
+use crate::binlog::{
+    TelecomMssOrg, TelecomMssOrgMapping, TelecomMssUser, TelecomMssUserMapping, TelecomOrg,
+    TelecomOrgTree, TelecomUser,
+};
 use crate::schedule::binlog_sync::{DataType, Page};
 use serde_json::{json, Value};
 
@@ -326,6 +329,133 @@ impl GatewayClient {
             _ => {
                 error!(
                     "Unexpected response payload format: {:?}",
+                    reply_buffer.body.payload
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    pub async fn user_loadbyid(&self, cid: &str) -> Result<Option<TelecomUser>> {
+        let payload: Vec<Value> = vec![json!("telecom"), json!(cid)];
+
+        let reply_buffer = self
+            .invoke_gateway_service(
+                "user.loadbyid",
+                self.telecom_config.targets.basedata,
+                payload,
+            )
+            .await?;
+
+        if reply_buffer.header.message_code != 10000 {
+            error!(
+                "Invalid message code: {}, description: {}",
+                reply_buffer.header.message_code, reply_buffer.header.description
+            );
+            return Ok(None);
+        }
+
+        // 解析响应
+        match &reply_buffer.body.payload {
+            Value::Object(payload_obj) => {
+                let parse_result =
+                    serde_json::from_value::<TelecomUser>(Value::Object(payload_obj.clone()));
+                match parse_result {
+                    Result::Ok(telecom_user) => Ok(Some(telecom_user)),
+                    Err(e) => {
+                        error!("Failed to parse TelecomUser from response: {e:?}");
+                        Ok(None)
+                    }
+                }
+            }
+            _ => {
+                error!(
+                    "Unexpected response payload format: {:?}",
+                    reply_buffer.body.payload
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    pub async fn mss_user_translate(&self, cid: &str) -> Result<Option<TelecomMssUserMapping>> {
+        let payload: Vec<Value> = vec![Value::Null, json!(cid)];
+
+        let reply_buffer = self
+            .invoke_gateway_service(
+                "mss.user.translate",
+                self.telecom_config.targets.mss,
+                payload,
+            )
+            .await?;
+
+        if reply_buffer.header.message_code != 10000 {
+            error!(
+                "Invalid message code: {}, description: {}",
+                reply_buffer.header.message_code, reply_buffer.header.description
+            );
+            return Ok(None);
+        }
+
+        match &reply_buffer.body.payload {
+            Value::Object(payload_obj) => {
+                let parse_result = serde_json::from_value::<TelecomMssUserMapping>(Value::Object(
+                    payload_obj.clone(),
+                ));
+                match parse_result {
+                    Result::Ok(mss_user_mapping) => Ok(Some(mss_user_mapping)),
+                    Err(e) => {
+                        error!("Failed to parse TelecomMssOrgMapping from response: {e:?}");
+                        Ok(None)
+                    }
+                }
+            }
+            _ => {
+                error!(
+                    "Unexpected response payload format: {:?}",
+                    reply_buffer.body.payload
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    pub async fn mss_user_queryorder(&self, hr_code: &str) -> Result<Option<Vec<TelecomMssUser>>> {
+        let payload: Vec<Value> = vec![
+            json!(vec![json!(hr_code)]), // 嵌套数组
+        ];
+
+        let reply_buffer = self
+            .invoke_gateway_service(
+                "mss.user.queryorder",
+                self.telecom_config.targets.basedata,
+                payload,
+            )
+            .await?;
+
+        if reply_buffer.header.message_code != 10000 {
+            error!(
+                "Invalid message code: {}, description: {}",
+                reply_buffer.header.message_code, reply_buffer.header.description
+            );
+            return Ok(None);
+        }
+
+        match &reply_buffer.body.payload {
+            Value::Array(arr) => {
+                let parse_result =
+                    serde_json::from_value::<Vec<TelecomMssUser>>(Value::Array(arr.clone()));
+                match parse_result {
+                    Result::Ok(vec_mss_user) => Ok(Some(vec_mss_user)),
+                    Err(e) => {
+                        error!("Failed to parse TelecomMssUser from response: {e:?}");
+                        Ok(None)
+                    }
+                }
+            }
+            _ => {
+                error!(
+                    "Unexpected mss_user_queryorder response payload format: {:?}",
                     reply_buffer.body.payload
                 );
                 Ok(None)

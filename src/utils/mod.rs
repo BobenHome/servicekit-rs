@@ -2,6 +2,7 @@ pub mod clickhouse_client;
 pub mod gateway_client;
 pub mod gateway_types;
 pub mod mss_client;
+pub mod mysql_client;
 mod process_error;
 pub mod redis;
 
