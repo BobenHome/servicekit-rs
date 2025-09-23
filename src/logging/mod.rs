@@ -206,7 +206,7 @@ pub fn init_logging() -> Result<()> {
         .with_line_number(true)
         .with_file(true)
         .with_level(true)
-        .with_filter(EnvFilter::new("info")); // 控制台日志通常使用 info 级别
+        .with_filter(EnvFilter::new("debug")); // 控制台日志通常使用 info 级别
 
     // 4. 将两个层组合起来并初始化全局订阅者
     tracing_subscriber::registry()

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
-use crate::binlog::OrgDataProcessor;
+use crate::binlog::{OrgDataProcessor, UserDataProcessor};
 use crate::utils::redis::{RedisLock, RedisMgr};
 use crate::{AppContext, TaskExecutor};
 
@@ -99,6 +99,12 @@ pub struct EntityMetaInfo {
     pub date_created: Option<i64>,
     #[serde(rename = "dateLastModified")]
     pub date_last_modified: Option<i64>,
+}
+
+// 用于记录永久失败的日志和原因
+pub struct PermanentFailure {
+    pub log: ModifyOperationLog,
+    pub reason: String,
 }
 
 pub struct BinlogSyncTimestampHolder {
@@ -192,38 +198,40 @@ impl BinlogSyncTimestampHolder {
             // 2.1. 在安全区域内获取时间戳
             let start_timestamp = self.get_timestamp().await?;
             // 2.2. 执行传入的业务逻辑
-            operation(start_timestamp).await
+            let end_time = operation(start_timestamp).await?;
+            self.save_timestamp(end_time).await?;
+            Ok(()) // 如果所有步骤都成功，返回 Ok
         };
 
         // 3. 将业务逻辑（Future）包装在 AssertUnwindSafe 和 catch_unwind 中
         // AssertUnwindSafe 是必要的，因为我们跨越了 panic 边界
         let future_result = AssertUnwindSafe(protected_logic).catch_unwind().await;
 
+        // 4. 无论上面的结果如何（成功、失败或Panic），都无条件执行锁释放
+        if let Err(e) = self.release_lock().await {
+            // 如果释放锁本身也失败了，只能记录一个错误，但不能阻止后续的错误传递
+            error!("CRITICAL: Failed to release lock during cleanup: {e:?}");
+        }
+
         // 4. 根据执行结果进行处理
         match future_result {
-            // 1: 业务逻辑成功完成，且返回 Ok(end_time)
-            Ok(Ok(end_time)) => {
-                info!("Scoped operation completed successfully.");
-                // 成功，更新时间戳
-                self.save_timestamp(end_time).await?;
-                self.release_lock().await?;
+            // 1: 所有工作都成功完成
+            Ok(Ok(_)) => {
+                info!("Scoped operation and cleanup completed successfully.");
+                Ok(())
             }
-            // 2: 业务逻辑成功完成，但返回了业务错误 Err
+            // 2: 工作中发生了可恢复的错误 (Err)
             Ok(Err(e)) => {
-                error!("Scoped operation failed with an error: {e:?}");
-                // 业务失败，只释放锁
-                self.release_lock().await?;
+                error!("Scoped operation failed with an error, lock has been released. Propagating error.");
+                Err(e) // 将原始错误传递给上层
             }
             // 3: 业务逻辑发生了 Panic
             Err(panic_payload) => {
-                error!("Scoped operation panicked!");
-                // 发生Panic，只释放锁
-                self.release_lock().await?;
-                // 重新抛出Panic，让上层知道程序处于不一致状态
+                error!("Scoped operation panicked! Lock has been released. Resuming unwind.");
+                // 重新抛出 Panic
                 std::panic::resume_unwind(panic_payload);
             }
         }
-        Ok(())
     }
 }
 
@@ -253,8 +261,7 @@ impl BinlogSyncTask {
                 timestamp + 300_000,                   // 5 分钟后
                 chrono::Utc::now().timestamp_millis(), // 时间戳全球统一不区分时区
             );
-            // 创建处理器实例
-            let org_processor = OrgDataProcessor::new(self.app_context.clone());
+
             for data_type in &[DataType::Org, DataType::User] {
                 let mut current_page = None;
                 let mut all_items_for_type = Vec::new();
@@ -282,14 +289,19 @@ impl BinlogSyncTask {
                     info!("Retrieved {items_len} records for type {data_type:?}, starting processing...");
                     match data_type {
                         DataType::Org => {
+                            // 创建组织处理器实例
+                            let org_processor = OrgDataProcessor::new(self.app_context.clone());
+
                             if let Err(e) = org_processor.process_orgs(all_items_for_type).await {
                                 error!("Critical error occurred while processing organization data: {e:?}");
                             }
                         }
                         DataType::User => {
-                            // 如果有用户处理器，在这里调用
-                            // user_processor.process_users_with_retry(all_items_for_type).await?;
-                            info!("Skipping user data processing.");
+                            // 创建用户处理器实例
+                            let user_processor = UserDataProcessor::new(self.app_context.clone());
+                            if let Err(e) = user_processor.process_users(all_items_for_type).await {
+                                error!("Critical error occurred while processing user data: {e:?}");
+                            }
                         }
                         _ => {
                             warn!("Unknown DataType: {data_type:?}");
@@ -311,7 +323,7 @@ impl TaskExecutor for BinlogSyncTask {
             info!("Starting binlog sync task.");
             // Execute Binlog sync
             if let Err(e) = self.sync_data().await {
-                error!("Failed to sync organization data: {e:?}");
+                error!("Failed to sync data: {e:?}");
             }
             info!("Binlog sync task completed.");
             Ok(())
