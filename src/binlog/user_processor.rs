@@ -582,53 +582,29 @@ impl PartialOrd for TelecomMssUser {
 
 impl Ord for TelecomMssUser {
     fn cmp(&self, other: &Self) -> Ordering {
-        // 解析 job_type 和 hr_job_type 为整数，解析失败时使用 0
-        let self_job_type = self
-            .job_type
-            .as_ref()
-            .and_then(|s| s.parse::<i32>().ok())
-            .unwrap_or(0);
+        // 一个辅助函数，用于安全地解析 Option<String> 为 i32，解析失败时使用 0
+        let parse_or_default = |opt_s: &Option<String>| {
+            opt_s
+                .as_ref()
+                .and_then(|s| s.parse::<i32>().ok())
+                .unwrap_or(0)
+        };
 
-        let other_job_type = other
-            .job_type
-            .as_ref()
-            .and_then(|s| s.parse::<i32>().ok())
-            .unwrap_or(0);
+        let self_job_type = parse_or_default(&self.job_type);
+        let other_job_type = parse_or_default(&other.job_type);
 
-        let self_hr_job_type = self
-            .hr_job_type
-            .as_ref()
-            .and_then(|s| s.parse::<i32>().ok())
-            .unwrap_or(0);
+        let self_hr_job_type = parse_or_default(&self.hr_job_type);
+        let other_hr_job_type = parse_or_default(&other.hr_job_type);
 
-        let other_hr_job_type = other
-            .hr_job_type
-            .as_ref()
-            .and_then(|s| s.parse::<i32>().ok())
-            .unwrap_or(0);
+        let self_time = self.time.unwrap_or(0);
+        let other_time = other.time.unwrap_or(0);
 
-        // 比较 user_status
-        match (self.user_status, other.user_status) {
-            (Some(a), Some(b)) if a < b => return Ordering::Less,
-            (Some(a), Some(b)) if a > b => return Ordering::Greater,
-            _ => {}
-        }
-
-        // 比较 hr_job_type
-        if self_hr_job_type < other_hr_job_type {
-            return Ordering::Less;
-        } else if self_hr_job_type > other_hr_job_type {
-            return Ordering::Greater;
-        }
-
-        // 比较 job_type
-        if self_job_type < other_job_type {
-            return Ordering::Less;
-        } else if self_job_type > other_job_type {
-            return Ordering::Greater;
-        }
-
-        Ordering::Equal
+        // 使用 .cmp().then_with(...) 进行优雅的链式比较
+        self.user_status
+            .cmp(&other.user_status)
+            .then_with(|| self_job_type.cmp(&other_job_type)) // user_status升序
+            .then_with(|| self_hr_job_type.cmp(&other_hr_job_type)) // job_type升序
+            .then_with(|| other_time.cmp(&self_time)) // 时间降序
     }
 }
 
@@ -1002,6 +978,7 @@ impl UserDataProcessor {
                 ProcessError::Permanent(anyhow::anyhow!("Unable to find TelecomMssUser"))
             })?;
 
+        // mss_users 接口返回的只有一个值，所以这里取最小没有意义了，但还是保留吧
         // 2. 使用 .iter().min() 找到优先级最高（最小）的用户
         let best_mss_user = mss_users.into_iter().min().ok_or_else(|| {
             // 3. 如果列表为空，说明没有找到任何有效用户，这是一个永久性错误
