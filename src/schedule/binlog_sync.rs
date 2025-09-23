@@ -252,6 +252,57 @@ impl BinlogSyncTask {
         }
     }
 
+    /// 辅助函数：为指定的数据类型获取并处理所有 binlog 数据。
+    async fn process_data_for_type(
+        &self,
+        data_type: DataType,
+        start_time: i64,
+        end_time: i64,
+    ) -> Result<()> {
+        let mut current_page = None;
+        let mut all_items_for_type = Vec::new();
+
+        // 1. 获取当前类型的所有分页数据
+        while let Some(result_set) = self
+            .app_context
+            .gateway_client
+            .binlog_find(data_type, start_time, end_time, current_page)
+            .await?
+        {
+            // 处理当前页的数据
+            if let Some(mut items) = result_set.items {
+                // 处理日志项
+                all_items_for_type.append(&mut items);
+            }
+            // 检查是否还有下一页
+            if !result_set.page.has_next_page() {
+                break;
+            }
+            current_page = Some(result_set.page.next_page());
+        }
+
+        // 2. 获取完所有数据后，分发给对应的处理器
+        if !all_items_for_type.is_empty() {
+            let items_len = all_items_for_type.len();
+            info!("Retrieved {items_len} records for type {data_type:?}, starting processing...");
+            match data_type {
+                DataType::Org => {
+                    let org_processor = OrgDataProcessor::new(self.app_context.clone());
+                    // 返回Result，让上层决定如何处理错误
+                    org_processor.process_orgs(all_items_for_type).await?;
+                }
+                DataType::User => {
+                    let user_processor = UserDataProcessor::new(self.app_context.clone());
+                    user_processor.process_users(all_items_for_type).await?;
+                }
+                _ => {
+                    warn!("Unknown or unsupported DataType for processing: {data_type:?}");
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn sync_data(&self) -> Result<()> {
         // 一个业务逻辑的闭包
         let business_logic = |timestamp: i64| async move {
@@ -262,52 +313,29 @@ impl BinlogSyncTask {
                 chrono::Utc::now().timestamp_millis(), // 时间戳全球统一不区分时区
             );
 
-            for data_type in &[DataType::Org, DataType::User] {
-                let mut current_page = None;
-                let mut all_items_for_type = Vec::new();
-                // 1. 首先，获取当前类型的所有分页数据
-                while let Some(result_set) = self
-                    .app_context
-                    .gateway_client
-                    .binlog_find(*data_type, start_time, end_time, current_page)
-                    .await?
-                {
-                    // 处理当前页的数据
-                    if let Some(mut items) = result_set.items {
-                        // 处理日志项
-                        all_items_for_type.append(&mut items);
-                    }
-                    // 检查是否还有下一页
-                    if !result_set.page.has_next_page() {
-                        break;
-                    }
-                    current_page = Some(result_set.page.next_page());
-                }
-                // 2. 获取完所有数据后，根据类型分发给对应的处理器
-                if !all_items_for_type.is_empty() {
-                    let items_len = all_items_for_type.len();
-                    info!("Retrieved {items_len} records for type {data_type:?}, starting processing...");
-                    match data_type {
-                        DataType::Org => {
-                            // 创建组织处理器实例
-                            let org_processor = OrgDataProcessor::new(self.app_context.clone());
+            // 1. 为 Org 和 User 分别创建一个异步任务 Future
+            let org_processing_future =
+                self.process_data_for_type(DataType::Org, start_time, end_time);
+            let user_processing_future =
+                self.process_data_for_type(DataType::User, start_time, end_time);
 
-                            if let Err(e) = org_processor.process_orgs(all_items_for_type).await {
-                                error!("Critical error occurred while processing organization data: {e:?}");
-                            }
-                        }
-                        DataType::User => {
-                            // 创建用户处理器实例
-                            let user_processor = UserDataProcessor::new(self.app_context.clone());
-                            if let Err(e) = user_processor.process_users(all_items_for_type).await {
-                                error!("Critical error occurred while processing user data: {e:?}");
-                            }
-                        }
-                        _ => {
-                            warn!("Unknown DataType: {data_type:?}");
-                        }
-                    }
-                }
+            // 2. 使用 tokio::join! 并发地执行这两个 Future
+            info!("Starting concurrent processing for Org and User data...");
+            let (org_result, user_result) =
+                tokio::join!(org_processing_future, user_processing_future);
+
+            // 3. 分别处理两个任务的结果
+            //    注意：我们只记录错误，不中断整个同步流程，这与您之前的逻辑一致
+            if let Err(e) = org_result {
+                error!("Error occurred while processing organization data: {e:?}");
+            } else {
+                info!("Organization data processing completed.");
+            }
+
+            if let Err(e) = user_result {
+                error!("Error occurred while processing user data: {e:?}");
+            } else {
+                info!("User data processing completed.");
             }
             // 业务逻辑成功完成，返回新的时间戳
             Ok(end_time)
