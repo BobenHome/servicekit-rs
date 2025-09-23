@@ -565,12 +565,9 @@ impl Eq for TelecomMssUser {}
 impl Hash for TelecomMssUser {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // 使用 hr_code 和 hr_id 的组合进行哈希
-        if let Some(hr_code) = &self.hr_code {
-            hr_code.hash(state);
-        }
-        if let Some(hr_id) = &self.hr_id {
-            hr_id.hash(state);
-        }
+        // 直接对 Option 类型的字段进行哈希
+        self.hr_id.hash(state);
+        self.hr_code.hash(state);
     }
 }
 
