@@ -574,16 +574,12 @@ impl OrgDataProcessor {
                 }
             }
 
-            let city_name = org
-                .full_path_name
-                .as_ref()
-                .map(|path| {
-                    let parts: Vec<&str> = path.split('-').collect();
-                    parts
-                        .get(city_index)
-                        .map(|s| get_city_clean_re().replace_all(s.trim(), "").to_string())
-                })
-                .flatten();
+            let city_name = org.full_path_name.as_ref().and_then(|path| {
+                let parts: Vec<&str> = path.split('-').collect();
+                parts
+                    .get(city_index)
+                    .map(|s| get_city_clean_re().replace_all(s.trim(), "").to_string())
+            });
 
             let department_info_is_close = org
                 .department_info

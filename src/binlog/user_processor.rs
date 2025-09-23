@@ -446,7 +446,7 @@ impl From<TelecomUser> for InsertTelecomUser {
             contact_info_email: contact_info.and_then(|ci| ci.email.clone()),
 
             // Archives Info Fields
-            archives_info_birthday: archives_info.and_then(|ai| ai.birthday.clone()),
+            archives_info_birthday: archives_info.and_then(|ai| ai.birthday),
             archives_info_isonlychild: archives_info
                 .and_then(|ai| ai.is_only_child.map(|b| b.to_string()).clone()),
             archives_info_is_union_members: archives_info
@@ -709,7 +709,7 @@ enum Transition {
     // 状态成功向前推进，这是新的状态
     Advanced(Box<ProcessingState>),
     // 所有步骤已成功完成，并携带最后一步获取的数据
-    Completed(Box<ModifyOperationLog>, TelecomMssUser),
+    Completed(Box<ModifyOperationLog>, Box<TelecomMssUser>),
 }
 
 pub struct UserDataProcessor {
@@ -930,7 +930,7 @@ impl UserDataProcessor {
                         // 处理最后一步 mss_orgs 的数据
                         let need_insert = log.type_ == 1 || log.type_ == 2;
                         if need_insert {
-                            processed_data.mss_users.push(mss_user);
+                            processed_data.mss_users.push(*mss_user);
                         }
                         break; // 此日志处理完成，跳出 loop
                     }
@@ -1012,7 +1012,10 @@ impl UserDataProcessor {
         })?;
 
         // 4. 成功后返回 Completed 状态，并携带单个最优用户的数据
-        Ok(Transition::Completed(Box::new(log), best_mss_user))
+        Ok(Transition::Completed(
+            Box::new(log),
+            Box::new(best_mss_user),
+        ))
     }
 
     async fn transform_to_telecom_user(
@@ -1180,48 +1183,48 @@ impl UserDataProcessor {
                 .push_bind(&user.name_card_folk)
                 .push_bind(&user.name_card_company)
                 .push_bind(&user.name_card_email)
-                .push_bind(&user.weight)
+                .push_bind(user.weight)
                 .push_bind(&user.no)
-                .push_bind(&user.account_type)
-                .push_bind(&user.datelastmodified) // 假设 entity_meta_info 中有 datelastmodified
+                .push_bind(user.account_type)
+                .push_bind(user.datelastmodified) // 假设 entity_meta_info 中有 datelastmodified
                 .push_bind(&user.certificate_code)
-                .push_bind(&user.gender)
+                .push_bind(user.gender)
                 .push_bind(&user.loginname)
                 .push_bind(&user.org)
-                .push_bind(&user.job_info_positive_date)
-                .push_bind(&user.job_info_special_job_years)
-                .push_bind(&user.job_info_work_date)
+                .push_bind(user.job_info_positive_date)
+                .push_bind(user.job_info_special_job_years)
+                .push_bind(user.job_info_work_date)
                 .push_bind(&user.job_info_is_special_job)
-                .push_bind(&user.job_info_leave_date)
-                .push_bind(&user.job_info_work_age)
+                .push_bind(user.job_info_leave_date)
+                .push_bind(user.job_info_work_age)
                 .push_bind(&user.job_info_is_core_staff)
-                .push_bind(&user.job_info_enterunit_date)
+                .push_bind(user.job_info_enterunit_date)
                 .push_bind(&user.is_ehr_sync)
                 .push_bind(&user.photo)
-                .push_bind(&user.effective_time_end)
+                .push_bind(user.effective_time_end)
                 .push_bind(&user.contact_info_phone)
                 .push_bind(&user.contact_info_mobile)
                 .push_bind(&user.contact_info_email)
                 .push_bind(&user.user_group_ids) // 将Vec<String>转换为字符串
                 .push_bind(&user.d_delete)
                 .push_bind(&user.is_delete)
-                .push_bind(&user.effective_time_start)
+                .push_bind(user.effective_time_start)
                 .push_bind(&user.encryptcertificate_code)
                 .push_bind(&user.name)
                 .push_bind(&user.id)
-                .push_bind(&user.certificate_type)
-                .push_bind(&user.status)
-                .push_bind(&user.archives_info_birthday)
+                .push_bind(user.certificate_type)
+                .push_bind(user.status)
+                .push_bind(user.archives_info_birthday)
                 .push_bind(&user.archives_info_isonlychild)
                 .push_bind(&user.archives_info_is_union_members)
                 .push_bind(&user.archives_info_major)
                 .push_bind(&user.archives_info_folk)
-                .push_bind(&user.archives_info_join_union_date)
+                .push_bind(user.archives_info_join_union_date)
                 .push_bind(&user.archives_info_political)
-                .push_bind(&user.archives_info_party_date)
+                .push_bind(user.archives_info_party_date)
                 .push_bind(&user.archives_info_academy)
                 .push_bind(&user.hit_date)
-                .push_bind(&user.in_time)
+                .push_bind(user.in_time)
                 .push_bind(&user.year)
                 .push_bind(&user.month)
                 .push_bind(&user.archived_batches)
