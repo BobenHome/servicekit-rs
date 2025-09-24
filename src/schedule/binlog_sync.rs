@@ -299,6 +299,8 @@ impl BinlogSyncTask {
                     warn!("Unknown or unsupported DataType for processing: {data_type:?}");
                 }
             }
+        } else {
+            warn!("No results set for type {data_type:?}");
         }
         Ok(())
     }

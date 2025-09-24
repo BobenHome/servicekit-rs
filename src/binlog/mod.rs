@@ -1,5 +1,6 @@
 mod org_processor;
 mod user_processor;
+mod processor;
 
 pub use org_processor::OrgDataProcessor;
 pub use org_processor::TelecomMssOrg;

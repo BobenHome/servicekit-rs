@@ -1,9 +1,13 @@
-use crate::schedule::binlog_sync::{EntityMetaInfo, ModifyOperationLog, PermanentFailure};
+use crate::binlog::processor::{
+    DataProcessorTrait, MergeableProcessedData, ProcessingState, Transition,
+};
+use crate::schedule::binlog_sync::{EntityMetaInfo, ModifyOperationLog};
 use crate::utils::ProcessError;
 use crate::utils::{mysql_client, MapToProcessError};
 use crate::AppContext;
 use anyhow::Result;
-use chrono::{Local, NaiveDateTime};
+use async_trait::async_trait;
+use chrono::NaiveDateTime;
 use itertools::Itertools; // 使用 itertools::Itertools::unique_by 来去重
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -22,6 +26,10 @@ fn get_city_clean_re() -> &'static Regex {
 }
 // 浙江特殊情况，第6个元素还是浙江，要取第7个元素
 const SPECIAL_CITY_MARKER: &str = "4843217f-e083-44a4-adc3-c85f25448af8";
+
+type Transition_ = Transition<TelecomOrg, TelecomOrgTree, TelecomMssOrgMapping, TelecomMssOrg>;
+
+type ProcessingState_ = ProcessingState<TelecomOrg, TelecomOrgTree, TelecomMssOrgMapping>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelecomOrg {
@@ -168,48 +176,8 @@ pub struct ProcessedOrgData {
     pub mss_org_codes_to_delete: Vec<String>,
 }
 
-impl ProcessedOrgData {
-    /// 将另一个 ProcessedOrgData 合并到自身
-    pub fn merge(&mut self, other: &mut ProcessedOrgData) {
-        self.telecom_orgs.append(&mut other.telecom_orgs);
-        self.telecom_org_trees.append(&mut other.telecom_org_trees);
-        self.telecom_mss_org_mappings
-            .append(&mut other.telecom_mss_org_mappings);
-        self.telecom_mss_orgs.append(&mut other.telecom_mss_orgs);
-
-        self.org_ids_to_delete.append(&mut other.org_ids_to_delete);
-        self.org_tree_ids_to_delete
-            .append(&mut other.org_tree_ids_to_delete);
-        self.org_mapping_codes_to_delete
-            .append(&mut other.org_mapping_codes_to_delete);
-        self.mss_org_codes_to_delete
-            .append(&mut other.mss_org_codes_to_delete);
-    }
-}
-
 // 最大重试次数
 const MAX_RETRIES: u32 = 3;
-
-// 定义处理状态机，用于保存每个日志的处理进度
-#[derive(Debug)]
-enum ProcessingState {
-    // 初始状态，只有原始日志
-    Initial(ModifyOperationLog),
-    // 成功获取 TelecomOrg，保存下来
-    GotTelecomOrg(ModifyOperationLog, Box<TelecomOrg>), // 将大的字段（如 TelecomOrg）包装在 Box 里，让枚举变体本身变得非常小，从而让整个枚举都变得小巧
-    // 成功获取 OrgTree，保存之前的结果
-    GotOrgTree(ModifyOperationLog, Box<TelecomOrgTree>),
-    // 成功获取 MssMapping，保存之前的所有结果
-    GotMssMapping(ModifyOperationLog, TelecomMssOrgMapping, String),
-}
-
-// 表示状态转换的结果
-enum Transition {
-    // 状态成功向前推进，这是新的状态
-    Advanced(Box<ProcessingState>),
-    // 所有步骤已成功完成，并携带最后一步获取的数据
-    Completed(Box<ModifyOperationLog>, Vec<TelecomMssOrg>),
-}
 
 pub struct OrgDataProcessor {
     app_context: Arc<AppContext>,
@@ -222,7 +190,7 @@ impl OrgDataProcessor {
     /// 主入口函数，包含了重试逻辑
     pub async fn process_orgs(&self, logs: Vec<ModifyOperationLog>) -> Result<()> {
         // 将原始日志初始化为状态机的初始状态
-        let mut states_to_process: Vec<ProcessingState> =
+        let mut states_to_process: Vec<ProcessingState_> =
             logs.into_iter().map(ProcessingState::Initial).collect();
 
         let mut final_processed_data = ProcessedOrgData::default();
@@ -809,153 +777,17 @@ impl OrgDataProcessor {
         Ok(())
     }
 
-    /// 状态机处理函数，驱动每个日志的状态向前演进
-    async fn advance_states(
-        &self,
-        states: Vec<ProcessingState>,
-    ) -> (
-        ProcessedOrgData,      // 本轮成功完成处理的数据
-        Vec<ProcessingState>,  // 需要重试的状态
-        Vec<PermanentFailure>, // 永久失败的日志
-    ) {
-        let mut processed_data = ProcessedOrgData::default();
-        let mut states_for_retry = Vec::new();
-        let mut permanent_failures = Vec::new();
-
-        let now = Local::now().naive_local();
-        let year = now.format("%Y").to_string();
-        let month = now.format("%m").to_string();
-
-        for state in states {
-            let mut current_state = state;
-            // 使用 loop 来驱动单个日志的状态流转，直到成功、需要重试或永久失败
-            loop {
-                // 注意：这里传递的是引用，避免不必要的 clone
-                let next_transition_result = match &current_state {
-                    ProcessingState::Initial(log) => self.handle_initial_state(log.clone()).await,
-                    // 解构时，org 是 &Box<TelecomOrg> 类型
-                    ProcessingState::GotTelecomOrg(log, _) => {
-                        self.handle_got_telecom_org_state(log.clone()).await
-                    }
-                    ProcessingState::GotOrgTree(log, _) => {
-                        self.handle_got_org_tree_state(log.clone()).await
-                    }
-                    ProcessingState::GotMssMapping(log, _, mss_code) => {
-                        self.handle_got_mss_mapping_state(log.clone(), mss_code.clone())
-                            .await
-                    }
-                };
-
-                match next_transition_result {
-                    // 状态成功推进
-                    Ok(Transition::Advanced(next_state_box)) => {
-                        // next_state_box 是 Box<ProcessingState>
-                        // 核心逻辑：立即处理上一个状态的数据
-                        match &*next_state_box {
-                            // 使用 * 解引用 Box
-                            ProcessingState::GotTelecomOrg(log, org) => {
-                                // 从 Initial -> GotTelecomOrg，处理 org
-                                let need_insert = log.type_ == 1 || log.type_ == 2;
-                                // org 是 &Box<TelecomOrg>，使用 .id 会自动解引用
-                                processed_data.org_ids_to_delete.push(org.id.clone());
-                                if need_insert {
-                                    // (**org) 从 &Box<T> 得到 T
-                                    let mut org_to_insert = (**org).clone();
-                                    org_to_insert.year = Some(year.clone());
-                                    org_to_insert.month = Some(month.clone());
-                                    org_to_insert.in_time = Some(now);
-                                    org_to_insert.hit_date1 = Some(now);
-                                    org_to_insert.hit_date =
-                                        Some(now.format("%Y-%m-%d").to_string());
-                                    processed_data.telecom_orgs.push(org_to_insert);
-                                }
-                            }
-                            ProcessingState::GotOrgTree(log, tree) => {
-                                // 从 GotTelecomOrg -> GotOrgTree，处理 tree
-                                let need_insert = log.type_ == 1 || log.type_ == 2;
-                                processed_data.org_tree_ids_to_delete.push(tree.id.clone());
-                                if need_insert {
-                                    processed_data.telecom_org_trees.push((**tree).clone());
-                                }
-                            }
-                            ProcessingState::GotMssMapping(log, mapping, mss_code) => {
-                                // 从 GotOrgTree -> GotMssMapping，处理 mapping 和 mss_code
-                                let need_insert = log.type_ == 1 || log.type_ == 2;
-                                if let Some(code) = &mapping.code {
-                                    processed_data
-                                        .org_mapping_codes_to_delete
-                                        .push(code.clone());
-                                }
-                                processed_data
-                                    .mss_org_codes_to_delete
-                                    .push(mss_code.clone());
-                                if need_insert {
-                                    processed_data
-                                        .telecom_mss_org_mappings
-                                        .push(mapping.clone());
-                                }
-                            }
-                            _ => {}
-                        }
-                        // 更新状态，继续循环
-                        // 更新状态，从 Box 中移出值
-                        current_state = *next_state_box;
-                    }
-                    // 所有步骤都已成功完成
-                    Ok(Transition::Completed(log, mss_orgs)) => {
-                        // 处理最后一步 mss_orgs 的数据
-                        let need_insert = log.type_ == 1 || log.type_ == 2;
-                        if need_insert {
-                            for mut mss_org in mss_orgs {
-                                mss_org.year = Some(year.clone());
-                                mss_org.month = Some(month.clone());
-                                mss_org.hit_date1 = Some(now);
-                                mss_org.hit_date =
-                                    Some(now.format("%Y-%m-%d %H:%M:%S").to_string());
-                                processed_data.telecom_mss_orgs.push(mss_org);
-                            }
-                        }
-                        break; // 此日志处理完成，跳出 loop
-                    }
-                    // 发生超时，将当前状态加入重试列表
-                    Err(ProcessError::GatewayTimeout(_)) => {
-                        states_for_retry.push(current_state);
-                        break; // 跳出 loop，处理下一条日志
-                    }
-                    // 发生永久性错误，记录并放弃
-                    Err(ProcessError::Permanent(e)) => {
-                        let log = match current_state {
-                            ProcessingState::Initial(log) => log,
-                            ProcessingState::GotTelecomOrg(log, ..) => log,
-                            ProcessingState::GotOrgTree(log, ..) => log,
-                            ProcessingState::GotMssMapping(log, ..) => log,
-                        };
-                        permanent_failures.push(PermanentFailure {
-                            log,
-                            reason: e.to_string(),
-                        });
-                        break; // 跳出 loop，处理下一条日志
-                    }
-                }
-            }
-        }
-        info!(
-            "states_for_retry: {states_for_retry:?} len: {}",
-            states_for_retry.len()
-        );
-        (processed_data, states_for_retry, permanent_failures)
-    }
-
     // --- 为每个状态创建一个独立的辅助处理函数，使逻辑更清晰 ---
     async fn handle_initial_state(
         &self,
         log: ModifyOperationLog,
-    ) -> Result<Transition, ProcessError> {
+    ) -> Result<Transition_, ProcessError> {
         match self.transform_to_telecom_org(&log).await? {
             // 成功获取，返回 Advanced 状态
-            Some(org) => Ok(Transition::Advanced(Box::new(
-                ProcessingState::GotTelecomOrg(log, Box::new(org)),
-            ))),
+            Some(org) => Ok(Transition_::Advanced(Box::new(ProcessingState::GotStep1(
+                log,
+                Box::new(org),
+            )))),
             None => Err(ProcessError::Permanent(anyhow::anyhow!(
                 "Unable to find corresponding TelecomOrg"
             ))),
@@ -965,9 +797,9 @@ impl OrgDataProcessor {
     async fn handle_got_telecom_org_state(
         &self,
         log: ModifyOperationLog,
-    ) -> Result<Transition, ProcessError> {
+    ) -> Result<Transition_, ProcessError> {
         match self.transform_to_org_tree(&log).await? {
-            Some(tree) => Ok(Transition::Advanced(Box::new(ProcessingState::GotOrgTree(
+            Some(tree) => Ok(Transition_::Advanced(Box::new(ProcessingState::GotStep2(
                 log,
                 Box::new(tree),
             )))),
@@ -980,11 +812,11 @@ impl OrgDataProcessor {
     async fn handle_got_org_tree_state(
         &self,
         log: ModifyOperationLog,
-    ) -> Result<Transition, ProcessError> {
+    ) -> Result<Transition_, ProcessError> {
         let (mapping, mss_code) = self.transform_to_mss_org_mapping(&log).await?;
         // 成功获取，返回 Advanced 状态
-        Ok(Transition::Advanced(Box::new(
-            ProcessingState::GotMssMapping(log, mapping, mss_code),
+        Ok(Transition_::Advanced(Box::new(
+            ProcessingState::GotMapping(log, mapping, mss_code),
         )))
     }
 
@@ -992,7 +824,7 @@ impl OrgDataProcessor {
         &self,
         log: ModifyOperationLog,
         mss_code: String,
-    ) -> Result<Transition, ProcessError> {
+    ) -> Result<Transition_, ProcessError> {
         let mss_orgs = self
             .transform_to_mss_orgs(&mss_code)
             .await?
@@ -1001,7 +833,127 @@ impl OrgDataProcessor {
             })?;
 
         // 这是最后一步，成功后返回 Completed 状态，并携带所有数据
-        Ok(Transition::Completed(Box::new(log), mss_orgs))
+        Ok(Transition_::Completed(Box::new(log), mss_orgs))
+    }
+}
+
+impl MergeableProcessedData for ProcessedOrgData {
+    fn merge(&mut self, other: &mut Self) {
+        self.telecom_orgs.append(&mut other.telecom_orgs);
+        self.telecom_org_trees.append(&mut other.telecom_org_trees);
+        self.telecom_mss_org_mappings
+            .append(&mut other.telecom_mss_org_mappings);
+        self.telecom_mss_orgs.append(&mut other.telecom_mss_orgs);
+
+        self.org_ids_to_delete.append(&mut other.org_ids_to_delete);
+        self.org_tree_ids_to_delete
+            .append(&mut other.org_tree_ids_to_delete);
+        self.org_mapping_codes_to_delete
+            .append(&mut other.org_mapping_codes_to_delete);
+        self.mss_org_codes_to_delete
+            .append(&mut other.mss_org_codes_to_delete);
+    }
+}
+
+#[async_trait]
+impl DataProcessorTrait for OrgDataProcessor {
+    type ProcessedData = ProcessedOrgData;
+    type Intermediate1 = TelecomOrg;
+    type Intermediate2 = TelecomOrgTree;
+    type Mapping = TelecomMssOrgMapping;
+    type Final = TelecomMssOrg;
+
+    async fn handle_initial(&self, log: &ModifyOperationLog) -> Result<Transition_, ProcessError> {
+        self.handle_initial_state(log.clone()).await
+    }
+
+    async fn handle_step1(&self, log: &ModifyOperationLog) -> Result<Transition_, ProcessError> {
+        self.handle_got_telecom_org_state(log.clone()).await
+    }
+
+    async fn handle_step2(&self, log: &ModifyOperationLog) -> Result<Transition_, ProcessError> {
+        self.handle_got_org_tree_state(log.clone()).await
+    }
+
+    async fn handle_mapping(
+        &self,
+        log: &ModifyOperationLog,
+        mss_code: &str,
+    ) -> Result<Transition_, ProcessError> {
+        self.handle_got_mss_mapping_state(log.clone(), mss_code.to_string())
+            .await
+    }
+
+    fn post_advance(
+        &self,
+        data: &mut Self::ProcessedData,
+        state: &ProcessingState<Self::Intermediate1, Self::Intermediate2, Self::Mapping>,
+        year: &str,
+        month: &str,
+        now: NaiveDateTime,
+    ) {
+        // 原 Advanced 时的处理
+        match state {
+            // 使用 * 解引用 Box
+            ProcessingState::GotStep1(log, org) => {
+                // 从 Initial -> GotTelecomOrg，处理 org
+                let need_insert = log.type_ == 1 || log.type_ == 2;
+                // org 是 &Box<TelecomOrg>，使用 .id 会自动解引用
+                data.org_ids_to_delete.push(org.id.clone());
+                if need_insert {
+                    // (**org) 从 &Box<T> 得到 T
+                    let mut org_to_insert = (**org).clone();
+                    org_to_insert.year = Some(year.to_string());
+                    org_to_insert.month = Some(month.to_string());
+                    org_to_insert.in_time = Some(now);
+                    org_to_insert.hit_date1 = Some(now);
+                    org_to_insert.hit_date = Some(now.format("%Y-%m-%d").to_string());
+                    data.telecom_orgs.push(org_to_insert);
+                }
+            }
+            ProcessingState::GotStep2(log, tree) => {
+                // 从 GotTelecomOrg -> GotOrgTree，处理 tree
+                let need_insert = log.type_ == 1 || log.type_ == 2;
+                data.org_tree_ids_to_delete.push(tree.id.clone());
+                if need_insert {
+                    data.telecom_org_trees.push((**tree).clone());
+                }
+            }
+            ProcessingState::GotMapping(log, mapping, mss_code) => {
+                // 从 GotOrgTree -> GotMssMapping，处理 mapping 和 mss_code
+                let need_insert = log.type_ == 1 || log.type_ == 2;
+                if let Some(code) = &mapping.code {
+                    data.org_mapping_codes_to_delete.push(code.clone());
+                }
+                data.mss_org_codes_to_delete.push(mss_code.clone());
+                if need_insert {
+                    data.telecom_mss_org_mappings.push(mapping.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn post_complete(
+        &self,
+        data: &mut Self::ProcessedData,
+        log: &ModifyOperationLog,
+        final_data: Vec<Self::Final>,
+        year: &str,
+        month: &str,
+        now: NaiveDateTime,
+    ) {
+        // 原 Completed 时的 mss_orgs 处理
+        let need_insert = log.type_ == 1 || log.type_ == 2;
+        if need_insert {
+            for mut mss_org in final_data {
+                mss_org.year = Some(year.to_string());
+                mss_org.month = Some(month.to_string());
+                mss_org.hit_date1 = Some(now);
+                mss_org.hit_date = Some(now.format("%Y-%m-%d %H:%M:%S").to_string());
+                data.telecom_mss_orgs.push(mss_org);
+            }
+        }
     }
 }
 

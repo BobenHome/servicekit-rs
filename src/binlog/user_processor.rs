@@ -1,8 +1,12 @@
-use crate::schedule::binlog_sync::{EntityMetaInfo, ModifyOperationLog, PermanentFailure};
+use crate::binlog::processor::{
+    DataProcessorTrait, MergeableProcessedData, ProcessingState, Transition,
+};
+use crate::schedule::binlog_sync::{EntityMetaInfo, ModifyOperationLog};
 use crate::utils::{mysql_client, MapToProcessError, ProcessError};
 use crate::AppContext;
-use anyhow::Result;
-use chrono::{Local, NaiveDateTime};
+use anyhow::{anyhow, Result};
+use async_trait::async_trait;
+use chrono::NaiveDateTime;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -15,6 +19,10 @@ use tracing::{error, info};
 
 // 最大重试次数
 const MAX_RETRIES: u32 = 3;
+
+type Transition_ = Transition<TelecomUser, (), TelecomMssUserMapping, TelecomMssUser>;
+
+type ProcessingState_ = ProcessingState<TelecomUser, (), TelecomMssUserMapping>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelecomUser {
@@ -652,9 +660,8 @@ pub struct ProcessedUserData {
     pub hr_codes_to_delete: Vec<String>, // 根据hr_code删除d_mss_user表数据
 }
 
-impl ProcessedUserData {
-    /// 将另一个 ProcessedUserData 合并到自身
-    pub fn merge(&mut self, other: &mut ProcessedUserData) {
+impl MergeableProcessedData for ProcessedUserData {
+    fn merge(&mut self, other: &mut Self) {
         self.telecom_users.append(&mut other.telecom_users);
         self.mss_user_mappings.append(&mut other.mss_user_mappings);
         self.mss_users.append(&mut other.mss_users);
@@ -664,25 +671,6 @@ impl ProcessedUserData {
         self.job_numbers_to_delete
             .append(&mut other.job_numbers_to_delete);
     }
-}
-
-// 定义处理状态机，用于保存每个日志的处理进度
-#[derive(Debug)]
-enum ProcessingState {
-    // 初始状态，只有原始日志
-    Initial(ModifyOperationLog),
-    // 成功获取 TelecomUser，保存下来
-    GotTelecomUser(ModifyOperationLog, Box<TelecomUser>), // 将大的字段（如 TelecomUser）包装在 Box 里，让枚举变体本身变得非常小，从而让整个枚举都变得小巧
-    // 成功获取 TelecomMssUserMapping，保存下来
-    GotMssUserMapping(ModifyOperationLog, TelecomMssUserMapping, String),
-}
-
-// 表示状态转换的结果
-enum Transition {
-    // 状态成功向前推进，这是新的状态
-    Advanced(Box<ProcessingState>),
-    // 所有步骤已成功完成，并携带最后一步获取的数据
-    Completed(Box<ModifyOperationLog>, Box<TelecomMssUser>),
 }
 
 pub struct UserDataProcessor {
@@ -696,7 +684,7 @@ impl UserDataProcessor {
     /// 主入口函数，包含了重试逻辑
     pub async fn process_users(&self, logs: Vec<ModifyOperationLog>) -> Result<()> {
         // 将原始日志初始化为状态机的初始状态
-        let mut states_to_process: Vec<ProcessingState> =
+        let mut states_to_process: Vec<ProcessingState_> =
             logs.into_iter().map(ProcessingState::Initial).collect();
 
         let mut final_processed_data = ProcessedUserData::default();
@@ -816,135 +804,17 @@ impl UserDataProcessor {
         Ok(())
     }
 
-    /// 状态机处理函数，驱动每个日志的状态向前演进
-    async fn advance_states(
-        &self,
-        states: Vec<ProcessingState>,
-    ) -> (
-        ProcessedUserData,     // 本轮成功完成处理的数据
-        Vec<ProcessingState>,  // 需要重试的状态
-        Vec<PermanentFailure>, // 永久失败的日志
-    ) {
-        let mut processed_data = ProcessedUserData::default();
-        let mut states_for_retry = Vec::new();
-        let mut permanent_failures = Vec::new();
-
-        let now = Local::now().naive_local();
-        let year = now.format("%Y").to_string();
-        let month = now.format("%m").to_string();
-
-        for state in states {
-            let mut current_state = state;
-            // 使用 loop 来驱动单个日志的状态流转，直到成功、需要重试或永久失败
-            loop {
-                // 注意：这里传递的是引用，避免不必要的 clone
-                let next_transition_result = match &current_state {
-                    ProcessingState::Initial(log) => self.handle_initial_state(log.clone()).await,
-                    // 解构时，user 是 &Box<TelecomUser> 类型
-                    ProcessingState::GotTelecomUser(log, _) => {
-                        self.handle_got_telecom_user_state(log.clone()).await
-                    }
-                    ProcessingState::GotMssUserMapping(log, _, hr_code) => {
-                        self.handle_got_mss_user_mapping_state(log.clone(), hr_code.clone())
-                            .await
-                    }
-                };
-
-                match next_transition_result {
-                    // 状态成功推进
-                    Ok(Transition::Advanced(next_state_box)) => {
-                        // next_state_box 是 Box<ProcessingState>
-                        // 核心逻辑：立即处理上一个状态的数据
-                        match &*next_state_box {
-                            // 使用 * 解引用 Box
-                            ProcessingState::GotTelecomUser(log, user) => {
-                                // 从 Initial -> GotTelecomUser，处理 user
-                                let need_insert = log.type_ == 1 || log.type_ == 2;
-                                // user 是 &Box<TelecomUser>，使用 .id 会自动解引用
-                                processed_data.user_ids_to_delete.push(user.id.clone());
-                                if let Some(job_number) = user
-                                    .ext
-                                    .as_ref()
-                                    .and_then(|ext| ext.authorize_info.as_ref())
-                                    .and_then(|auth_info| auth_info.job_number.as_ref())
-                                {
-                                    processed_data
-                                        .job_numbers_to_delete
-                                        .push(job_number.clone());
-                                }
-                                if need_insert {
-                                    // (**user) 从 &Box<T> 得到 T
-                                    let mut user_to_insert = (**user).clone();
-                                    user_to_insert.year = Some(year.clone());
-                                    user_to_insert.month = Some(month.clone());
-                                    user_to_insert.in_time = Some(now);
-                                    user_to_insert.hit_date1 = Some(now);
-                                    user_to_insert.hit_date =
-                                        Some(now.format("%Y-%m-%d").to_string());
-                                    processed_data.telecom_users.push(user_to_insert);
-                                }
-                            }
-                            ProcessingState::GotMssUserMapping(log, mapping, hr_code) => {
-                                // 从 GotTelecomUser -> GotMssMapping，处理 mapping 和 hr_code
-                                let need_insert = log.type_ == 1 || log.type_ == 2;
-                                processed_data.hr_codes_to_delete.push(hr_code.clone());
-                                if need_insert {
-                                    processed_data.mss_user_mappings.push(mapping.clone());
-                                }
-                            }
-                            _ => {}
-                        }
-                        // 更新状态，继续循环
-                        // 更新状态，从 Box 中移出值
-                        current_state = *next_state_box;
-                    }
-                    // 所有步骤都已成功完成
-                    Ok(Transition::Completed(log, mss_user)) => {
-                        // 处理最后一步 mss_orgs 的数据
-                        let need_insert = log.type_ == 1 || log.type_ == 2;
-                        if need_insert {
-                            processed_data.mss_users.push(*mss_user);
-                        }
-                        break; // 此日志处理完成，跳出 loop
-                    }
-                    // 发生超时，将当前状态加入重试列表
-                    Err(ProcessError::GatewayTimeout(_)) => {
-                        states_for_retry.push(current_state);
-                        break; // 跳出 loop，处理下一条日志
-                    }
-                    // 发生永久性错误，记录并放弃
-                    Err(ProcessError::Permanent(e)) => {
-                        let log = match current_state {
-                            ProcessingState::Initial(log) => log,
-                            ProcessingState::GotTelecomUser(log, ..) => log,
-                            ProcessingState::GotMssUserMapping(log, ..) => log,
-                        };
-                        permanent_failures.push(PermanentFailure {
-                            log,
-                            reason: e.to_string(),
-                        });
-                        break; // 跳出 loop，处理下一条日志
-                    }
-                }
-            }
-        }
-        info!(
-            "states_for_retry: {states_for_retry:?} len: {}",
-            states_for_retry.len()
-        );
-        (processed_data, states_for_retry, permanent_failures)
-    }
-
     // --- 为每个状态创建一个独立的辅助处理函数，使逻辑更清晰 ---
     async fn handle_initial_state(
         &self,
         log: ModifyOperationLog,
-    ) -> Result<Transition, ProcessError> {
+    ) -> Result<Transition_, ProcessError> {
         match self.transform_to_telecom_user(&log).await? {
             // 成功获取，返回 Advanced 状态
-            Some(user) => Ok(Transition::Advanced(Box::new(
-                ProcessingState::GotTelecomUser(log, Box::new(user)),
-            ))),
+            Some(user) => Ok(Transition_::Advanced(Box::new(ProcessingState::GotStep1(
+                log,
+                Box::new(user),
+            )))),
             None => Err(ProcessError::Permanent(anyhow::anyhow!(
                 "Unable to find corresponding TelecomUser"
             ))),
@@ -954,19 +824,19 @@ impl UserDataProcessor {
     async fn handle_got_telecom_user_state(
         &self,
         log: ModifyOperationLog,
-    ) -> Result<Transition, ProcessError> {
+    ) -> Result<Transition_, ProcessError> {
         let (mapping, hr_code) = self.transform_to_mss_user_mapping(&log).await?;
         // 成功获取，返回 Advanced 状态
-        Ok(Transition::Advanced(Box::new(
-            ProcessingState::GotMssUserMapping(log, mapping, hr_code),
-        )))
+        Ok(Transition::Advanced(Box::new(ProcessingState::GotMapping(
+            log, mapping, hr_code,
+        ))))
     }
 
     async fn handle_got_mss_user_mapping_state(
         &self,
         log: ModifyOperationLog,
         hr_code: String,
-    ) -> Result<Transition, ProcessError> {
+    ) -> Result<Transition_, ProcessError> {
         // 1. 获取 mss_users 列表
         let mss_users = self
             .transform_to_mss_users(&hr_code)
@@ -986,10 +856,7 @@ impl UserDataProcessor {
         })?;
 
         // 4. 成功后返回 Completed 状态，并携带单个最优用户的数据
-        Ok(Transition::Completed(
-            Box::new(log),
-            Box::new(best_mss_user),
-        ))
+        Ok(Transition::Completed(Box::new(log), vec![best_mss_user]))
     }
 
     async fn transform_to_telecom_user(
@@ -1383,5 +1250,100 @@ impl UserDataProcessor {
         info!("mc_user_ztk table refresh complete.");
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl DataProcessorTrait for UserDataProcessor {
+    type ProcessedData = ProcessedUserData;
+    type Intermediate1 = TelecomUser;
+    type Intermediate2 = ();
+    type Mapping = TelecomMssUserMapping;
+    type Final = TelecomMssUser;
+
+    async fn handle_initial(&self, log: &ModifyOperationLog) -> Result<Transition_, ProcessError> {
+        self.handle_initial_state(log.clone()).await
+    }
+
+    async fn handle_step1(&self, log: &ModifyOperationLog) -> Result<Transition_, ProcessError> {
+        self.handle_got_telecom_user_state(log.clone()).await
+    }
+
+    async fn handle_step2(&self, _log: &ModifyOperationLog) -> Result<Transition_, ProcessError> {
+        Err(ProcessError::Permanent(anyhow!(
+            "UserDataProcessor does not support step2 (no Intermediate2)"
+        )))
+    }
+
+    async fn handle_mapping(
+        &self,
+        log: &ModifyOperationLog,
+        mss_code: &str,
+    ) -> Result<Transition_, ProcessError> {
+        self.handle_got_mss_user_mapping_state(log.clone(), mss_code.to_string())
+            .await
+    }
+
+    fn post_advance(
+        &self,
+        data: &mut Self::ProcessedData,
+        state: &ProcessingState<Self::Intermediate1, Self::Intermediate2, Self::Mapping>,
+        year: &str,
+        month: &str,
+        now: NaiveDateTime,
+    ) {
+        match state {
+            ProcessingState::GotStep1(log, user) => {
+                // 从 Initial -> GotTelecomUser，处理 user
+                let need_insert = log.type_ == 1 || log.type_ == 2;
+                // user 是 &Box<TelecomUser>，使用 .id 会自动解引用
+                data.user_ids_to_delete.push(user.id.clone());
+                if let Some(job_number) = user
+                    .ext
+                    .as_ref()
+                    .and_then(|ext| ext.authorize_info.as_ref())
+                    .and_then(|auth_info| auth_info.job_number.as_ref())
+                {
+                    data.job_numbers_to_delete.push(job_number.clone());
+                }
+                if need_insert {
+                    // (**user) 从 &Box<T> 得到 T
+                    let mut user_to_insert = (**user).clone();
+                    user_to_insert.year = Some(year.to_string());
+                    user_to_insert.month = Some(month.to_string());
+                    user_to_insert.in_time = Some(now);
+                    user_to_insert.hit_date1 = Some(now);
+                    user_to_insert.hit_date = Some(now.format("%Y-%m-%d").to_string());
+                    data.telecom_users.push(user_to_insert);
+                }
+            }
+            ProcessingState::GotMapping(log, mapping, hr_code) => {
+                // 从 GotTelecomUser -> GotMssMapping，处理 mapping 和 hr_code
+                let need_insert = log.type_ == 1 || log.type_ == 2;
+                data.hr_codes_to_delete.push(hr_code.clone());
+                if need_insert {
+                    data.mss_user_mappings.push(mapping.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn post_complete(
+        &self,
+        data: &mut Self::ProcessedData,
+        log: &ModifyOperationLog,
+        final_data: Vec<Self::Final>,
+        _year: &str,
+        _month: &str,
+        _now: NaiveDateTime,
+    ) {
+        // 处理最后一步 mss_orgs 的数据
+        let need_insert = log.type_ == 1 || log.type_ == 2;
+        if need_insert {
+            for mss_user in final_data {
+                data.mss_users.push(mss_user);
+            }
+        }
     }
 }
