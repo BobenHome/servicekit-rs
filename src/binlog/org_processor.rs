@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Execute, MySql, QueryBuilder, Transaction};
 use std::ops::DerefMut;
 use std::sync::{Arc, OnceLock};
-use tracing::{error, info};
+use tracing::info;
 
 // 定义静态Regex（全局或模块级，确保只编译一次）
 static CITY_CLEAN_RE: OnceLock<Regex> = OnceLock::new();
@@ -28,8 +28,6 @@ fn get_city_clean_re() -> &'static Regex {
 const SPECIAL_CITY_MARKER: &str = "4843217f-e083-44a4-adc3-c85f25448af8";
 
 type Transition_ = Transition<TelecomOrg, TelecomOrgTree, TelecomMssOrgMapping, TelecomMssOrg>;
-
-type ProcessingState_ = ProcessingState<TelecomOrg, TelecomOrgTree, TelecomMssOrgMapping>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelecomOrg {
@@ -176,9 +174,6 @@ pub struct ProcessedOrgData {
     pub mss_org_codes_to_delete: Vec<String>,
 }
 
-// 最大重试次数
-const MAX_RETRIES: u32 = 3;
-
 pub struct OrgDataProcessor {
     app_context: Arc<AppContext>,
 }
@@ -186,202 +181,6 @@ pub struct OrgDataProcessor {
 impl OrgDataProcessor {
     pub fn new(app_context: Arc<AppContext>) -> Self {
         Self { app_context }
-    }
-    /// 主入口函数，包含了重试逻辑
-    pub async fn process_orgs(&self, logs: Vec<ModifyOperationLog>) -> Result<()> {
-        // 将原始日志初始化为状态机的初始状态
-        let mut states_to_process: Vec<ProcessingState_> =
-            logs.into_iter().map(ProcessingState::Initial).collect();
-
-        let mut final_processed_data = ProcessedOrgData::default();
-
-        for i in 0..MAX_RETRIES {
-            if states_to_process.is_empty() {
-                info!("All organization data has been successfully processed.");
-                break;
-            }
-            info!(
-                "Processing organization data, {} retry attempts remaining. Pending count: {}",
-                MAX_RETRIES - i,
-                states_to_process.len()
-            );
-
-            let (mut processed_data_chunk, next_states, permanent_failures) =
-                self.advance_states(states_to_process).await;
-
-            // 合并当轮成功的数据
-            final_processed_data.merge(&mut processed_data_chunk);
-
-            // 记录永久失败的日志
-            if !permanent_failures.is_empty() {
-                for failure in permanent_failures {
-                    error!(
-                        "Processing organization permanently failed, will not retry. Reason: {}. Log: {:?}",
-                        failure.reason, failure.log
-                    );
-                }
-            }
-            // 更新待处理列表，用于下一轮重试
-            states_to_process = next_states;
-        }
-        // 重试次数用尽后，如果仍有未处理的状态，则记录错误
-        if !states_to_process.is_empty() {
-            error!(
-                "Maximum retries reached, {} logs still unprocessed.",
-                states_to_process.len()
-            );
-        }
-        // 所有轮次结束后，一次性保存所有成功的数据
-        match self.save_processed_data(&final_processed_data).await {
-            Ok(_) => info!("All batches of organization data successfully saved to database."),
-            Err(e) => error!("Failed to refresh mc_org_show table: {e:?}"),
-        }
-
-        // 在 d_* 表更新成功后，调用刷新 mc_org_show 的逻辑
-        if let Err(e) = self.refresh_mc_org_show(&final_processed_data).await {
-            error!("Failed to refresh mc_org_show table: {e:?}");
-        }
-
-        Ok(())
-    }
-
-    /// 保存处理好的数据到数据库
-    async fn save_processed_data(&self, data: &ProcessedOrgData) -> Result<()> {
-        let mut tx = self.app_context.mysql_pool.begin().await?;
-        // --- 1. 执行批量刪除 ---
-        info!("Starting batch deletion organization of old data...");
-        mysql_client::batch_delete(&mut tx, "d_telecom_org", "id", &data.org_ids_to_delete).await?;
-        mysql_client::batch_delete(
-            &mut tx,
-            "d_telecom_org_tree",
-            "id",
-            &data.org_tree_ids_to_delete,
-        )
-        .await?;
-        mysql_client::batch_delete(
-            &mut tx,
-            "d_mss_org_mapping",
-            "code",
-            &data.org_mapping_codes_to_delete,
-        )
-        .await?;
-        mysql_client::batch_delete(
-            &mut tx,
-            "d_mss_org",
-            "hrcode",
-            &data.mss_org_codes_to_delete,
-        )
-        .await?;
-        // --- 2. 执行批量插入 ---
-        info!("Starting batch insertion of new data...");
-        // 1. 插入 TelecomOrg
-        let orgs_to_insert = data
-            .telecom_orgs
-            .iter()
-            .cloned()
-            .unique_by(|o| o.id.clone())
-            .collect::<Vec<_>>();
-        if !orgs_to_insert.is_empty() {
-            self.batch_insert_telecom_orgs(&mut tx, orgs_to_insert)
-                .await?;
-        }
-        // 2. 插入 TelecomOrgTree
-        let org_trees_to_insert = data
-            .telecom_org_trees
-            .iter()
-            .cloned()
-            .unique_by(|o| o.id.clone())
-            .collect::<Vec<_>>();
-        if !org_trees_to_insert.is_empty() {
-            self.batch_insert_telecom_org_trees(&mut tx, org_trees_to_insert)
-                .await?;
-        }
-
-        // 3. 插入 TelecomMssOrgMapping
-        let mss_org_mappings_to_insert = data
-            .telecom_mss_org_mappings
-            .iter()
-            .cloned()
-            .unique_by(|o| o.code.clone())
-            .collect::<Vec<_>>();
-        if !mss_org_mappings_to_insert.is_empty() {
-            self.batch_insert_telecom_mss_org_mappings(&mut tx, mss_org_mappings_to_insert)
-                .await?;
-        }
-
-        // 4. 插入 TelecomMssOrg
-        let mss_orgs_to_insert = data
-            .telecom_mss_orgs
-            .iter()
-            .cloned()
-            .unique_by(|o| o.id.clone())
-            .collect::<Vec<_>>();
-        if !mss_orgs_to_insert.is_empty() {
-            self.batch_insert_telecom_mss_orgs(&mut tx, mss_orgs_to_insert)
-                .await?
-        }
-        tx.commit().await?;
-        Ok(())
-    }
-
-    /// 根据受影响的组织ID，增量刷新 mc_org_show 表
-    async fn refresh_mc_org_show(&self, data: &ProcessedOrgData) -> Result<()> {
-        // 1. 收集本次批次所有受影响的、唯一的组织ID
-        let mut affected_ids = data
-            .org_ids_to_delete
-            .iter()
-            .cloned()
-            .collect::<std::collections::HashSet<_>>();
-        for org in &data.telecom_orgs {
-            affected_ids.insert(org.id.clone());
-        }
-        let unique_affected_ids: Vec<String> = affected_ids.into_iter().collect();
-
-        if unique_affected_ids.is_empty() {
-            info!("No organization data changes, no need to refresh mc_org_show.");
-            return Ok(());
-        }
-        info!(
-            "Starting refresh of mc_org_show table, affected organization ID count: {}",
-            unique_affected_ids.len()
-        );
-        // 2. 开启一个新的事务来处理刷新逻辑
-        let mut tx = self.app_context.mysql_pool.begin().await?;
-
-        // 3. (Delete) 先从 mc_org_show 中删除所有受影响的记录
-        mysql_client::batch_delete(&mut tx, "mc_org_show", "ID", &unique_affected_ids).await?;
-
-        // 4. (Insert) 重新计算并插入需要存在的数据
-        //    只为那些需要新增或更新的组织（即存在于 telecom_orgs 列表中的）执行插入
-        let ids_to_insert: Vec<String> = data.telecom_orgs.iter().map(|o| o.id.clone()).collect();
-
-        if !ids_to_insert.is_empty() {
-            // 4.1. 从 .sql 文件加载原始SQL
-            let raw_sql_query = sqlx::query_file!("queries/refresh_mc_org_show.sql");
-
-            // 4.2. 使用 QueryBuilder 附加动态的 WHERE IN 子句
-            let mut query_builder = QueryBuilder::new(raw_sql_query.sql());
-            query_builder.push(" WHERE TE.ID IN (");
-            let mut separated = query_builder.separated(", ");
-            for id in &ids_to_insert {
-                separated.push_bind(id);
-            }
-            separated.push_unseparated(")");
-
-            // 4.3. 构建并执行最终的查询
-            let final_query = query_builder.build();
-            let result = final_query.execute(tx.deref_mut()).await?;
-
-            info!(
-                "Inserted {} new records into mc_org_show",
-                result.rows_affected()
-            );
-        }
-        // 5. 提交事务
-        tx.commit().await?;
-        info!("mc_org_show table refresh complete.");
-
-        Ok(())
     }
 
     async fn transform_to_telecom_org(
@@ -542,8 +341,17 @@ impl OrgDataProcessor {
                 }
             }
 
-            let city_name = org.full_path_name.as_ref().and_then(|path| {
-                let parts: Vec<&str> = path.split('-').collect();
+            let full_path_name_parts: Option<Vec<&str>> = org
+                .full_path_name
+                .as_ref()
+                .map(|path| path.split('-').collect());
+            if province_name.is_none() {
+                // 如果 province_name 仍为 None，则取 full_path_name 索引为4的名称
+                if let Some(parts) = &full_path_name_parts {
+                    province_name = parts.get(4).map(|name| name.to_string());
+                }
+            }
+            let city_name = full_path_name_parts.as_ref().and_then(|parts| {
                 parts
                     .get(city_index)
                     .map(|s| get_city_clean_re().replace_all(s.trim(), "").to_string())
@@ -954,6 +762,145 @@ impl DataProcessorTrait for OrgDataProcessor {
                 data.telecom_mss_orgs.push(mss_org);
             }
         }
+    }
+
+    /// 保存处理好的数据到数据库
+    async fn save_processed_data(&self, data: &ProcessedOrgData) -> Result<()> {
+        let mut tx = self.app_context.mysql_pool.begin().await?;
+        // --- 1. 执行批量刪除 ---
+        info!("Starting batch deletion organization of old data...");
+        mysql_client::batch_delete(&mut tx, "d_telecom_org", "id", &data.org_ids_to_delete).await?;
+        mysql_client::batch_delete(
+            &mut tx,
+            "d_telecom_org_tree",
+            "id",
+            &data.org_tree_ids_to_delete,
+        )
+        .await?;
+        mysql_client::batch_delete(
+            &mut tx,
+            "d_mss_org_mapping",
+            "code",
+            &data.org_mapping_codes_to_delete,
+        )
+        .await?;
+        mysql_client::batch_delete(
+            &mut tx,
+            "d_mss_org",
+            "hrcode",
+            &data.mss_org_codes_to_delete,
+        )
+        .await?;
+        // --- 2. 执行批量插入 ---
+        info!("Starting batch insertion of new data...");
+        // 1. 插入 TelecomOrg
+        let orgs_to_insert = data
+            .telecom_orgs
+            .iter()
+            .cloned()
+            .unique_by(|o| o.id.clone())
+            .collect::<Vec<_>>();
+        if !orgs_to_insert.is_empty() {
+            self.batch_insert_telecom_orgs(&mut tx, orgs_to_insert)
+                .await?;
+        }
+        // 2. 插入 TelecomOrgTree
+        let org_trees_to_insert = data
+            .telecom_org_trees
+            .iter()
+            .cloned()
+            .unique_by(|o| o.id.clone())
+            .collect::<Vec<_>>();
+        if !org_trees_to_insert.is_empty() {
+            self.batch_insert_telecom_org_trees(&mut tx, org_trees_to_insert)
+                .await?;
+        }
+
+        // 3. 插入 TelecomMssOrgMapping
+        let mss_org_mappings_to_insert = data
+            .telecom_mss_org_mappings
+            .iter()
+            .cloned()
+            .unique_by(|o| o.code.clone())
+            .collect::<Vec<_>>();
+        if !mss_org_mappings_to_insert.is_empty() {
+            self.batch_insert_telecom_mss_org_mappings(&mut tx, mss_org_mappings_to_insert)
+                .await?;
+        }
+
+        // 4. 插入 TelecomMssOrg
+        let mss_orgs_to_insert = data
+            .telecom_mss_orgs
+            .iter()
+            .cloned()
+            .unique_by(|o| o.id.clone())
+            .collect::<Vec<_>>();
+        if !mss_orgs_to_insert.is_empty() {
+            self.batch_insert_telecom_mss_orgs(&mut tx, mss_orgs_to_insert)
+                .await?
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// 根据受影响的组织ID，增量刷新 mc_org_show 表
+    async fn refresh_table(&self, data: &ProcessedOrgData) -> Result<()> {
+        // 1. 收集本次批次所有受影响的、唯一的组织ID
+        let mut affected_ids = data
+            .org_ids_to_delete
+            .iter()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
+        for org in &data.telecom_orgs {
+            affected_ids.insert(org.id.clone());
+        }
+        let unique_affected_ids: Vec<String> = affected_ids.into_iter().collect();
+
+        if unique_affected_ids.is_empty() {
+            info!("No organization data changes, no need to refresh mc_org_show.");
+            return Ok(());
+        }
+        info!(
+            "Starting refresh of mc_org_show table, affected organization ID count: {}",
+            unique_affected_ids.len()
+        );
+        // 2. 开启一个新的事务来处理刷新逻辑
+        let mut tx = self.app_context.mysql_pool.begin().await?;
+
+        // 3. (Delete) 先从 mc_org_show 中删除所有受影响的记录
+        mysql_client::batch_delete(&mut tx, "mc_org_show", "ID", &unique_affected_ids).await?;
+
+        // 4. (Insert) 重新计算并插入需要存在的数据
+        //    只为那些需要新增或更新的组织（即存在于 telecom_orgs 列表中的）执行插入
+        let ids_to_insert: Vec<String> = data.telecom_orgs.iter().map(|o| o.id.clone()).collect();
+
+        if !ids_to_insert.is_empty() {
+            // 4.1. 从 .sql 文件加载原始SQL
+            let raw_sql_query = sqlx::query_file!("queries/refresh_mc_org_show.sql");
+
+            // 4.2. 使用 QueryBuilder 附加动态的 WHERE IN 子句
+            let mut query_builder = QueryBuilder::new(raw_sql_query.sql());
+            query_builder.push(" WHERE TE.ID IN (");
+            let mut separated = query_builder.separated(", ");
+            for id in &ids_to_insert {
+                separated.push_bind(id);
+            }
+            separated.push_unseparated(")");
+
+            // 4.3. 构建并执行最终的查询
+            let final_query = query_builder.build();
+            let result = final_query.execute(tx.deref_mut()).await?;
+
+            info!(
+                "Inserted {} new records into mc_org_show",
+                result.rows_affected()
+            );
+        }
+        // 5. 提交事务
+        tx.commit().await?;
+        info!("mc_org_show table refresh complete.");
+
+        Ok(())
     }
 }
 

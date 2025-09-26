@@ -1,3 +1,4 @@
+use crate::binlog::processor::DataProcessorTrait;
 use anyhow::{Context, Result};
 use futures::FutureExt; // 引入 catch_unwind
 use serde::{Deserialize, Serialize};
@@ -289,11 +290,11 @@ impl BinlogSyncTask {
                 DataType::Org => {
                     let org_processor = OrgDataProcessor::new(self.app_context.clone());
                     // 返回Result，让上层决定如何处理错误
-                    org_processor.process_orgs(all_items_for_type).await?;
+                    org_processor.process(all_items_for_type).await?;
                 }
                 DataType::User => {
                     let user_processor = UserDataProcessor::new(self.app_context.clone());
-                    user_processor.process_users(all_items_for_type).await?;
+                    user_processor.process(all_items_for_type).await?;
                 }
                 _ => {
                     warn!("Unknown or unsupported DataType for processing: {data_type:?}");

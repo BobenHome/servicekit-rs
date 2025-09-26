@@ -4,7 +4,10 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{Local, NaiveDateTime};
 use std::fmt::Debug;
-use tracing::info;
+use tracing::{error, info};
+
+// 最大重试次数
+const MAX_RETRIES: u32 = 3;
 
 // 共享 trait 用于 ProcessedData 的 merge
 pub trait MergeableProcessedData {
@@ -168,6 +171,73 @@ pub trait DataProcessorTrait: Send + Sync {
             states_for_retry.len()
         );
         (processed_data, states_for_retry, permanent_failures)
+    }
+
+    // 新增：保存处理数据的抽象方法
+    async fn save_processed_data(&self, data: &Self::ProcessedData) -> Result<()>;
+
+    // 新增：刷新表的抽象方法
+    async fn refresh_table(&self, data: &Self::ProcessedData) -> Result<()>;
+
+    // 默认实现的 process 方法，主入口函数，包含了重试逻辑
+    async fn process(&self, logs: Vec<ModifyOperationLog>) -> Result<()> {
+        // 初始化状态机
+        let mut states_to_process: Vec<
+            ProcessingState<Self::Intermediate1, Self::Intermediate2, Self::Mapping>,
+        > = logs.into_iter().map(ProcessingState::Initial).collect();
+
+        let mut final_processed_data = Self::ProcessedData::default();
+
+        for i in 0..MAX_RETRIES {
+            if states_to_process.is_empty() {
+                info!("All data has been successfully processed.");
+                break;
+            }
+            info!(
+                "Processing data, {} retry attempts remaining. Pending count: {}",
+                MAX_RETRIES - i,
+                states_to_process.len()
+            );
+
+            let (mut processed_data_chunk, next_states, permanent_failures) =
+                self.advance_states(states_to_process).await;
+
+            // 合并当轮成功的数据
+            final_processed_data.merge(&mut processed_data_chunk);
+
+            // 记录永久失败的日志
+            if !permanent_failures.is_empty() {
+                for failure in permanent_failures {
+                    error!(
+                        "Processing permanently failed, will not retry. Reason: {}. Log: {:?}",
+                        failure.reason, failure.log
+                    );
+                }
+            }
+            // 更新待处理列表，用于下一轮重试
+            states_to_process = next_states;
+        }
+
+        // 重试次数用尽后，如果仍有未处理的状态，则记录错误
+        if !states_to_process.is_empty() {
+            error!(
+                "Maximum retries reached, {} logs still unprocessed.",
+                states_to_process.len()
+            );
+        }
+
+        // 所有轮次结束后，一次性保存所有成功的数据
+        match self.save_processed_data(&final_processed_data).await {
+            Ok(_) => info!("All batches of data successfully saved to database."),
+            Err(e) => error!("Failed to save data: {e:?}"),
+        }
+
+        // 在 d_* 表更新成功后，刷新 mc_user_ztk 或者 mc_org_show 表
+        if let Err(e) = self.refresh_table(&final_processed_data).await {
+            error!("Failed to refresh table: {e:?}");
+        }
+
+        Ok(())
     }
 }
 

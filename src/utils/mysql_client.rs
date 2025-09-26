@@ -14,7 +14,7 @@ pub async fn batch_delete(
     }
     // 对 ID 进行去重
     let unique_ids: Vec<_> = ids.iter().unique().collect();
-    // 构建 `DELETE FROM table WHERE id IN (?, ?, ...)` 查詢
+    // 构建 `DELETE FROM {table_name} WHERE {key_name} IN (?, ?, ...)` 查詢
     let query_str = format!(
         "DELETE FROM {} WHERE {} IN ({})",
         table_name,
@@ -25,7 +25,7 @@ pub async fn batch_delete(
     for id in unique_ids {
         query = query.bind(id);
     }
-    let result = query.execute(tx.deref_mut()).await?; // 修改这一行
+    let result = query.execute(tx.deref_mut()).await?;
     info!(
         "Deleted {} records in table {}",
         result.rows_affected(),

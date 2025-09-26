@@ -15,14 +15,9 @@ use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::ops::DerefMut;
 use std::sync::Arc;
-use tracing::{error, info};
-
-// 最大重试次数
-const MAX_RETRIES: u32 = 3;
+use tracing::info;
 
 type Transition_ = Transition<TelecomUser, (), TelecomMssUserMapping, TelecomMssUser>;
-
-type ProcessingState_ = ProcessingState<TelecomUser, (), TelecomMssUserMapping>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelecomUser {
@@ -670,6 +665,8 @@ impl MergeableProcessedData for ProcessedUserData {
             .append(&mut other.user_ids_to_delete);
         self.job_numbers_to_delete
             .append(&mut other.job_numbers_to_delete);
+        self.hr_codes_to_delete
+            .append(&mut other.hr_codes_to_delete);
     }
 }
 
@@ -680,128 +677,6 @@ pub struct UserDataProcessor {
 impl UserDataProcessor {
     pub fn new(app_context: Arc<AppContext>) -> Self {
         Self { app_context }
-    }
-    /// 主入口函数，包含了重试逻辑
-    pub async fn process_users(&self, logs: Vec<ModifyOperationLog>) -> Result<()> {
-        // 将原始日志初始化为状态机的初始状态
-        let mut states_to_process: Vec<ProcessingState_> =
-            logs.into_iter().map(ProcessingState::Initial).collect();
-
-        let mut final_processed_data = ProcessedUserData::default();
-
-        for i in 0..MAX_RETRIES {
-            if states_to_process.is_empty() {
-                info!("All user data has been successfully processed.");
-                break;
-            }
-            info!(
-                "Processing user data, {} retry attempts remaining. Pending count: {}",
-                MAX_RETRIES - i,
-                states_to_process.len()
-            );
-
-            let (mut processed_data_chunk, next_states, permanent_failures) =
-                self.advance_states(states_to_process).await;
-
-            // 合并当轮成功的数据
-            final_processed_data.merge(&mut processed_data_chunk);
-
-            // 记录永久失败的日志
-            if !permanent_failures.is_empty() {
-                for failure in permanent_failures {
-                    error!(
-                        "Processing user permanently failed, will not retry. Reason: {}. Log: {:?}",
-                        failure.reason, failure.log
-                    );
-                }
-            }
-            // 更新待处理列表，用于下一轮重试
-            states_to_process = next_states;
-        }
-
-        // 重试次数用尽后，如果仍有未处理的状态，则记录错误
-        if !states_to_process.is_empty() {
-            error!(
-                "Maximum retries reached, {} logs still unprocessed.",
-                states_to_process.len()
-            );
-        }
-
-        // 所有轮次结束后，一次性保存所有成功的数据
-        match self.save_processed_data(&final_processed_data).await {
-            Ok(_) => info!("All batches of user data successfully saved to database."),
-            Err(e) => error!("Failed to refresh mc_org_show table: {e:?}"),
-        }
-
-        // 在 d_* 表更新成功后，调用刷新 mc_user_ztk 的逻辑
-        if let Err(e) = self.refresh_mc_user_ztk(&final_processed_data).await {
-            error!("Failed to refresh mc_user_ztk table: {e:?}");
-        }
-
-        Ok(())
-    }
-
-    /// 保存处理好的数据到数据库
-    async fn save_processed_data(&self, data: &ProcessedUserData) -> Result<()> {
-        let mut tx = self.app_context.mysql_pool.begin().await?;
-        // --- 1. 执行批量刪除 ---
-        info!("Starting batch deletion user of old data...");
-        mysql_client::batch_delete(&mut tx, "d_telecom_user", "id", &data.user_ids_to_delete)
-            .await?;
-        mysql_client::batch_delete(
-            &mut tx,
-            "d_mss_user_mapping",
-            "USERID",
-            &data.user_ids_to_delete,
-        )
-        .await?;
-        mysql_client::batch_delete(&mut tx, "d_mss_user", "HRCODE", &data.hr_codes_to_delete)
-            .await?;
-        mysql_client::batch_delete(
-            &mut tx,
-            "d_mss_user",
-            "JOBNUMBER",
-            &data.job_numbers_to_delete,
-        )
-        .await?;
-        // --- 2. 执行批量插入 ---
-        info!("Starting batch insertion user of new data...");
-        // 1. 插入 TelecomUser
-        let users_to_insert = data
-            .telecom_users
-            .iter()
-            .cloned()
-            .unique_by(|o| o.id.clone())
-            .collect::<Vec<_>>();
-        if !users_to_insert.is_empty() {
-            self.batch_insert_telecom_users(&mut tx, users_to_insert)
-                .await?;
-        }
-        // 2. 插入 TelecomMssUserMapping
-        let mss_user_mappings_to_insert = data
-            .mss_user_mappings
-            .iter()
-            .cloned()
-            .unique_by(|o| o.uid.clone())
-            .collect::<Vec<_>>();
-        if !mss_user_mappings_to_insert.is_empty() {
-            self.batch_insert_telecom_mss_user_mappings(&mut tx, mss_user_mappings_to_insert)
-                .await?;
-        }
-        // 3. 插入 TelecomMssUser
-        let mss_users_to_insert = data
-            .mss_users
-            .iter()
-            .cloned()
-            .unique_by(|o| o.id.clone())
-            .collect::<Vec<_>>();
-        if !mss_users_to_insert.is_empty() {
-            self.batch_insert_telecom_mss_users(&mut tx, mss_users_to_insert)
-                .await?
-        }
-        tx.commit().await?;
-        info!("End batch insertion user of new data...");
-        Ok(())
     }
 
     // --- 为每个状态创建一个独立的辅助处理函数，使逻辑更清晰 ---
@@ -1191,66 +1066,6 @@ impl UserDataProcessor {
         query.execute(&mut **tx).await?;
         Ok(())
     }
-
-    /// 根据受影响的组织ID，增量刷新 mc_org_show 表
-    async fn refresh_mc_user_ztk(&self, data: &ProcessedUserData) -> Result<()> {
-        // 1. 收集本次批次所有受影响的、唯一的组织ID
-        let mut affected_ids = data
-            .user_ids_to_delete
-            .iter()
-            .cloned()
-            .collect::<std::collections::HashSet<_>>();
-        for user in &data.telecom_users {
-            affected_ids.insert(user.id.clone());
-        }
-        let unique_affected_ids: Vec<String> = affected_ids.into_iter().collect();
-
-        if unique_affected_ids.is_empty() {
-            info!("No organization data changes, no need to refresh mc_org_show.");
-            return Ok(());
-        }
-        info!(
-            "Starting refresh of mc_org_show table, affected organization ID count: {}",
-            unique_affected_ids.len()
-        );
-        // 2. 开启一个新的事务来处理刷新逻辑
-        let mut tx = self.app_context.mysql_pool.begin().await?;
-
-        // 3. (Delete) 先从 mc_user_ztk 中删除所有受影响的记录
-        mysql_client::batch_delete(&mut tx, "mc_user_ztk", "ID", &unique_affected_ids).await?;
-
-        // 4. (Insert) 重新计算并插入需要存在的数据
-        //    只为那些需要新增或更新的组织（即存在于 telecom_users 列表中的）执行插入
-        let ids_to_insert: Vec<String> = data.telecom_users.iter().map(|o| o.id.clone()).collect();
-
-        if !ids_to_insert.is_empty() {
-            // 4.1. 从 .sql 文件加载原始SQL
-            let raw_sql_query = sqlx::query_file!("queries/refresh_mc_user_ztk.sql");
-
-            // 4.2. 使用 QueryBuilder 附加动态的 WHERE IN 子句
-            let mut query_builder = QueryBuilder::new(raw_sql_query.sql());
-            query_builder.push(" WHERE TU.ID IN (");
-            let mut separated = query_builder.separated(", ");
-            for id in &ids_to_insert {
-                separated.push_bind(id);
-            }
-            separated.push_unseparated(")");
-
-            // 4.3. 构建并执行最终的查询
-            let final_query = query_builder.build();
-            let result = final_query.execute(tx.deref_mut()).await?;
-
-            info!(
-                "Inserted {} new records into mc_user_ztk",
-                result.rows_affected()
-            );
-        }
-        // 5. 提交事务
-        tx.commit().await?;
-        info!("mc_user_ztk table refresh complete.");
-
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -1345,5 +1160,130 @@ impl DataProcessorTrait for UserDataProcessor {
                 data.mss_users.push(mss_user);
             }
         }
+    }
+
+    /// 保存处理好的数据到数据库
+    async fn save_processed_data(&self, data: &ProcessedUserData) -> Result<()> {
+        let mut tx = self.app_context.mysql_pool.begin().await?;
+        // --- 1. 执行批量刪除 ---
+        info!("Starting batch deletion user of old data...");
+        mysql_client::batch_delete(&mut tx, "d_telecom_user", "id", &data.user_ids_to_delete)
+            .await?;
+        mysql_client::batch_delete(
+            &mut tx,
+            "d_mss_user_mapping",
+            "USERID",
+            &data.user_ids_to_delete,
+        )
+        .await?;
+        info!("hr_codes_to_delete: {:?}", &data.hr_codes_to_delete);
+        info!("job_numbers_to_delete: {:?}", &data.job_numbers_to_delete);
+        mysql_client::batch_delete(&mut tx, "d_mss_user", "HRCODE", &data.hr_codes_to_delete)
+            .await?;
+        mysql_client::batch_delete(
+            &mut tx,
+            "d_mss_user",
+            "JOBNUMBER",
+            &data.job_numbers_to_delete,
+        )
+        .await?;
+        // --- 2. 执行批量插入 ---
+        info!("Starting batch insertion user of new data...");
+        // 1. 插入 TelecomUser
+        let users_to_insert = data
+            .telecom_users
+            .iter()
+            .cloned()
+            .unique_by(|o| o.id.clone())
+            .collect::<Vec<_>>();
+        if !users_to_insert.is_empty() {
+            self.batch_insert_telecom_users(&mut tx, users_to_insert)
+                .await?;
+        }
+        // 2. 插入 TelecomMssUserMapping
+        let mss_user_mappings_to_insert = data
+            .mss_user_mappings
+            .iter()
+            .cloned()
+            .unique_by(|o| o.uid.clone())
+            .collect::<Vec<_>>();
+        if !mss_user_mappings_to_insert.is_empty() {
+            self.batch_insert_telecom_mss_user_mappings(&mut tx, mss_user_mappings_to_insert)
+                .await?;
+        }
+        // 3. 插入 TelecomMssUser
+        let mss_users_to_insert = data
+            .mss_users
+            .iter()
+            .cloned()
+            .unique_by(|o| o.id.clone())
+            .collect::<Vec<_>>();
+        if !mss_users_to_insert.is_empty() {
+            self.batch_insert_telecom_mss_users(&mut tx, mss_users_to_insert)
+                .await?
+        }
+        tx.commit().await?;
+        info!("End batch insertion user of new data...");
+        Ok(())
+    }
+
+    /// 根据受影响的组织ID，增量刷新 mc_org_show 表
+    async fn refresh_table(&self, data: &ProcessedUserData) -> Result<()> {
+        // 1. 收集本次批次所有受影响的、唯一的组织ID
+        let mut affected_ids = data
+            .user_ids_to_delete
+            .iter()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
+        for user in &data.telecom_users {
+            affected_ids.insert(user.id.clone());
+        }
+        let unique_affected_ids: Vec<String> = affected_ids.into_iter().collect();
+
+        if unique_affected_ids.is_empty() {
+            info!("No organization data changes, no need to refresh mc_org_show.");
+            return Ok(());
+        }
+        info!(
+            "Starting refresh of mc_org_show table, affected organization ID count: {}",
+            unique_affected_ids.len()
+        );
+        // 2. 开启一个新的事务来处理刷新逻辑
+        let mut tx = self.app_context.mysql_pool.begin().await?;
+
+        // 3. (Delete) 先从 mc_user_ztk 中删除所有受影响的记录
+        mysql_client::batch_delete(&mut tx, "mc_user_ztk", "ID", &unique_affected_ids).await?;
+
+        // 4. (Insert) 重新计算并插入需要存在的数据
+        //    只为那些需要新增或更新的组织（即存在于 telecom_users 列表中的）执行插入
+        let ids_to_insert: Vec<String> = data.telecom_users.iter().map(|o| o.id.clone()).collect();
+
+        if !ids_to_insert.is_empty() {
+            // 4.1. 从 .sql 文件加载原始SQL
+            let raw_sql_query = sqlx::query_file!("queries/refresh_mc_user_ztk.sql");
+
+            // 4.2. 使用 QueryBuilder 附加动态的 WHERE IN 子句
+            let mut query_builder = QueryBuilder::new(raw_sql_query.sql());
+            query_builder.push(" WHERE TU.ID IN (");
+            let mut separated = query_builder.separated(", ");
+            for id in &ids_to_insert {
+                separated.push_bind(id);
+            }
+            separated.push_unseparated(")");
+
+            // 4.3. 构建并执行最终的查询
+            let final_query = query_builder.build();
+            let result = final_query.execute(tx.deref_mut()).await?;
+
+            info!(
+                "Inserted {} new records into mc_user_ztk",
+                result.rows_affected()
+            );
+        }
+        // 5. 提交事务
+        tx.commit().await?;
+        info!("mc_user_ztk table refresh complete.");
+
+        Ok(())
     }
 }
