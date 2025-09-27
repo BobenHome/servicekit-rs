@@ -9,6 +9,17 @@ use tracing::{error, info};
 // 最大重试次数
 const MAX_RETRIES: u32 = 3;
 
+pub fn clean_field(field: &mut Option<String>) {
+    if let Some(s) = field.as_mut() {
+        *s = s
+            .trim()
+            .replace(['\n', '\r'], "")
+            .replace(['/', '|'], "-")
+            .replace([' ', '\u{A0}'], "")
+            .to_string();
+    }
+}
+
 // 共享 trait 用于 ProcessedData 的 merge
 pub trait MergeableProcessedData {
     fn merge(&mut self, other: &mut Self);

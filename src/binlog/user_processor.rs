@@ -1,5 +1,5 @@
 use crate::binlog::processor::{
-    DataProcessorTrait, MergeableProcessedData, ProcessingState, Transition,
+    clean_field, DataProcessorTrait, MergeableProcessedData, ProcessingState, Transition,
 };
 use crate::schedule::binlog_sync::{EntityMetaInfo, ModifyOperationLog};
 use crate::utils::{mysql_client, MapToProcessError, ProcessError};
@@ -56,17 +56,8 @@ pub struct TelecomUser {
 
 impl TelecomUser {
     pub fn trim(&mut self) {
-        if let Some(name) = &mut self.name {
-            *name = name
-                .replace("\n\r", "")
-                .replace("/", "-")
-                .trim()
-                .to_string();
-        }
-
-        if let Some(org) = &mut self.org {
-            *org = org.replace("\n\r", "").replace("/", "-").trim().to_string();
-        }
+        clean_field(&mut self.name);
+        clean_field(&mut self.org);
 
         if let Some(user_ext) = &mut self.ext {
             user_ext.trim();
@@ -74,6 +65,10 @@ impl TelecomUser {
 
         if let Some(contact_info) = &mut self.contact_info {
             contact_info.trim();
+        }
+
+        if let Some(archives_info) = &mut self.archives_info {
+            archives_info.trim();
         }
     }
 }
@@ -87,17 +82,9 @@ pub struct ContactInfo {
 
 impl ContactInfo {
     pub fn trim(&mut self) {
-        if let Some(phone) = &mut self.phone {
-            *phone = phone.trim().replace("\n", "").to_string();
-        }
-
-        if let Some(mobile) = &mut self.mobile {
-            *mobile = mobile.trim().replace("\n", "").to_string();
-        }
-
-        if let Some(email) = &mut self.email {
-            *email = email.trim().replace("\n", "").to_string();
-        }
+        clean_field(&mut self.phone);
+        clean_field(&mut self.mobile);
+        clean_field(&mut self.email);
     }
 }
 
@@ -117,17 +104,9 @@ pub struct ArchivesInfo {
 
 impl ArchivesInfo {
     pub fn trim(&mut self) {
-        if let Some(major) = &mut self.major {
-            *major = major.trim().replace("\n", "").to_string();
-        }
-
-        if let Some(folk) = &mut self.folk {
-            *folk = folk.trim().replace("\n", "").to_string();
-        }
-
-        if let Some(academy) = &mut self.academy {
-            *academy = academy.trim().replace("\n", "").to_string();
-        }
+        clean_field(&mut self.major);
+        clean_field(&mut self.folk);
+        clean_field(&mut self.academy);
     }
 }
 
@@ -175,79 +154,13 @@ pub struct NameCard {
 
 impl NameCard {
     pub fn trim(&mut self) {
-        if let Some(email) = &mut self.email {
-            *email = email.trim().replace("\n", "").to_string();
-        }
-
-        if let Some(name) = &mut self.name {
-            *name = name
-                .trim()
-                .replace("\n", "")
-                .replace("/", "-")
-                .replace(" ", "") // 注意：这是非断空格（&nbsp;）
-                .replace("|", "-")
-                .trim()
-                .to_string();
-        }
-
-        if let Some(company) = &mut self.company {
-            *company = company
-                .trim()
-                .replace("\n\r", "")
-                .replace("/", "-")
-                .replace("|", "-")
-                .trim()
-                .to_string();
-        }
-
-        if let Some(organization) = &mut self.organization {
-            *organization = organization
-                .replace("\n", "")
-                .replace("/", "-")
-                .replace("|", "-")
-                .trim()
-                .to_string();
-        }
-
-        if let Some(station) = &mut self.station {
-            *station = station
-                .trim()
-                .replace("\n", "")
-                .replace("/", "-")
-                .replace("|", "-")
-                .trim()
-                .to_string();
-        }
-
-        if let Some(mobile) = &mut self.mobile {
-            *mobile = mobile
-                .trim()
-                .replace("\n", "")
-                .replace("/", "-")
-                .replace("|", "-")
-                .trim()
-                .to_string();
-        }
-
-        if let Some(company_phone) = &mut self.company_phone {
-            *company_phone = company_phone
-                .trim()
-                .replace("\n", "")
-                .replace("/", "-")
-                .replace("|", "-")
-                .trim()
-                .to_string();
-        }
-
-        if let Some(folk) = &mut self.folk {
-            *folk = folk
-                .trim()
-                .replace("\n", "")
-                .replace("/", "-")
-                .replace("|", "-")
-                .trim()
-                .to_string();
-        }
+        clean_field(&mut self.email);
+        clean_field(&mut self.company);
+        clean_field(&mut self.organization);
+        clean_field(&mut self.station);
+        clean_field(&mut self.mobile);
+        clean_field(&mut self.company_phone);
+        clean_field(&mut self.folk);
     }
 }
 
@@ -288,9 +201,7 @@ pub struct BaseStation {
 
 impl BaseStation {
     pub fn trim(&mut self) {
-        if let Some(phone) = &mut self.name {
-            *phone = phone.trim().replace("\n", "").to_string();
-        }
+        clean_field(&mut self.name);
     }
 }
 
@@ -398,9 +309,11 @@ struct InsertTelecomUser {
 }
 
 impl From<TelecomUser> for InsertTelecomUser {
-    fn from(user: TelecomUser) -> Self {
+    fn from(mut user: TelecomUser) -> Self {
         // 使用 Option 的 `?` 操作符（问号）可以极大简化链式调用
         // 我们将提取逻辑放在一个立即执行的闭包中，以便使用 `?`
+        user.trim();
+
         let base_station = (|| user.ext.as_ref()?.base_station.as_ref())();
         let job_info = (|| user.ext.as_ref()?.job_info.as_ref())();
         let name_card = (|| user.ext.as_ref()?.name_card.as_ref())();
