@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use sqlx::{MySqlPool, Row};
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
@@ -223,7 +222,9 @@ impl BinlogSyncTimestampHolder {
             }
             // 2: 工作中发生了可恢复的错误 (Err)
             Ok(Err(e)) => {
-                error!("Scoped operation failed with an error, lock has been released. Propagating error.");
+                error!(
+                    "Scoped operation failed with an error, lock has been released. Propagating error."
+                );
                 Err(e) // 将原始错误传递给上层
             }
             // 3: 业务逻辑发生了 Panic
@@ -348,16 +349,15 @@ impl BinlogSyncTask {
     }
 }
 
+#[async_trait::async_trait]
 impl TaskExecutor for BinlogSyncTask {
-    fn execute(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
-        Box::pin(async move {
-            info!("Starting binlog sync task.");
-            // Execute Binlog sync
-            if let Err(e) = self.sync_data().await {
-                error!("Failed to sync data: {e:?}");
-            }
-            info!("Binlog sync task completed.");
-            Ok(())
-        })
+    async fn execute(&self) -> Result<()> {
+        info!("Starting binlog sync task.");
+        // Execute Binlog sync
+        if let Err(e) = self.sync_data().await {
+            error!("Failed to sync data: {e:?}");
+        }
+        info!("Binlog sync task completed.");
+        Ok(())
     }
 }

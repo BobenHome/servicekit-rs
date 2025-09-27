@@ -1,5 +1,3 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::schedule::push_executor::{execute_push_task_logic, PsnDataWrapper, QueryType};
@@ -58,9 +56,9 @@ impl PsnClassPushTask {
     }
 }
 
-// 实现 TaskExecutor trait
+#[async_trait::async_trait]
 impl TaskExecutor for PsnClassPushTask {
-    fn execute(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
-        Box::pin(execute_push_task_logic::<PsnClassPushTask>(&self.base))
+    async fn execute(&self) -> Result<()> {
+        execute_push_task_logic::<PsnClassPushTask>(&self.base).await
     }
 }

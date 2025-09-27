@@ -1,5 +1,3 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -59,9 +57,9 @@ impl PsnTrainingPushTask {
     }
 }
 
-// 实现 TaskExecutor trait
+#[async_trait::async_trait]
 impl TaskExecutor for PsnTrainingPushTask {
-    fn execute(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
-        Box::pin(execute_push_task_logic::<PsnTrainingPushTask>(&self.base))
+    async fn execute(&self) -> Result<()> {
+        execute_push_task_logic::<PsnTrainingPushTask>(&self.base).await
     }
 }
