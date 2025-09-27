@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{Datelike, Local};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::PoisonError;
 use std::{
     fs::{self, File, OpenOptions},
     io::{self},
@@ -42,7 +43,6 @@ struct LocalTimeRollingWriter {
     active_file: Arc<Mutex<File>>,
     last_rotation_day: AtomicU32, // 存储上次轮转发生的日期（天数）
     log_dir: PathBuf,
-    // current_log_file_name: Mutex<String>, // 可以考虑存储当前文件名，但我们通过 current_day 来判断更简洁
 }
 
 impl LocalTimeRollingWriter {
@@ -141,7 +141,11 @@ impl LocalTimeRollingWriter {
             ))?;
 
         // 仅在所有操作成功后，才更新 active_file 和 last_rotation_day
-        *self.active_file.lock().unwrap() = new_file;
+        // 使用 unwrap_or_else 忽略中毒并恢复（标准库最佳实践），不关心中毒细节（常见于非关键数据，如日志文件），可以直接恢复 MutexGuard 并继续。这不会传播错误，而是“宽容”处理。
+        *self
+            .active_file
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = new_file;
         self.last_rotation_day.store(today, Ordering::Relaxed);
 
         println!("INFO: New log file opened: {new_file_path:?}");
@@ -151,7 +155,7 @@ impl LocalTimeRollingWriter {
 }
 
 // Implement MakeWriter for LocalTimeRollingWriter
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LocalTimeRollingWriter {
+impl<'a> fmt::MakeWriter<'a> for LocalTimeRollingWriter {
     type Writer = LogFileWriter;
 
     fn make_writer(&self) -> Self::Writer {
@@ -195,7 +199,7 @@ pub fn init_logging() -> Result<()> {
         .with_line_number(true)
         .with_file(true)
         .with_level(true)
-        .with_filter(EnvFilter::new("debug")); // 文件日志通常使用 info 级别
+        .with_filter(EnvFilter::new("info")); // 文件日志通常使用 info 级别
 
     // 3. 创建一个 fmt 层用于控制台输出
     let stdout_layer = fmt::layer()
@@ -206,7 +210,7 @@ pub fn init_logging() -> Result<()> {
         .with_line_number(true)
         .with_file(true)
         .with_level(true)
-        .with_filter(EnvFilter::new("debug")); // 控制台日志通常使用 info 级别
+        .with_filter(EnvFilter::new("debug")); // 控制台日志通常使用 debug 级别
 
     // 4. 将两个层组合起来并初始化全局订阅者
     tracing_subscriber::registry()
