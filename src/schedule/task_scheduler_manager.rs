@@ -152,23 +152,37 @@ impl TaskSchedulerManager {
     }
 
     /// 启动一个在后台持续运行的任务
-    async fn run_continuous_task(&self, task: Arc<dyn TaskExecutor + Send + Sync + 'static>) {
+    async fn run_continuous_task(&self, task: Arc<BinlogSyncTask>) {
         let task_name = task.name().to_string();
         info!("Spawning continuous task '{task_name}' to run in the background.");
 
         tokio::spawn(async move {
+            let idle_sleep = Duration::from_secs(60); // 空闲时休眠60秒
+            let busy_sleep = Duration::from_secs(1); // 追赶时休眠1秒
+            let error_sleep = Duration::from_secs(10); // 出错时休眠10秒
+
             loop {
                 info!("Starting a new cycle for continuous task '{task_name}'.");
-                if let Err(e) = task.execute().await {
-                    error!(
-                        "Continuous task '{task_name}' failed: {e:?}. Waiting for 10 seconds before next cycle."
-                    );
-                    // 如果任务失败，等待一段时间再重试，避免因连续失败导致CPU空转或频繁攻击下游服务
-                    sleep(Duration::from_secs(10)).await;
-                } else {
-                    info!("Continuous task '{task_name}' completed a cycle successfully.");
-                    //  成功后短暂休眠，避免对数据库或API造成过大压力
-                    sleep(Duration::from_secs(1)).await;
+
+                match task.sync_data().await {
+                    Ok(true) => {
+                        // binlog 日志追赶上系统时间后，休眠60s后再执行
+                        info!("System is caught up. Sleeping for {idle_sleep:?}.");
+                        sleep(idle_sleep).await;
+                    }
+                    Ok(false) => {
+                        //  成功后短暂休眠，避免对数据库或API造成过大压力
+                        info!("Continuous task '{task_name}' completed a cycle successfully.");
+                        info!("System is catching up. Sleeping for {busy_sleep:?}.");
+                        sleep(busy_sleep).await;
+                    }
+                    Err(e) => {
+                        error!(
+                            "Continuous task '{task_name}' failed: {e:?}. Waiting for 10 seconds before next cycle."
+                        );
+                        // 如果任务失败，等待一段时间再重试，避免因连续失败导致CPU空转或频繁攻击下游服务
+                        sleep(error_sleep).await;
+                    }
                 }
             }
         });

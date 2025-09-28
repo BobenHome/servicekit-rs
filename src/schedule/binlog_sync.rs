@@ -9,9 +9,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
+use crate::AppContext;
 use crate::binlog::{OrgDataProcessor, UserDataProcessor};
 use crate::utils::redis::{RedisLock, RedisMgr};
-use crate::{AppContext, TaskExecutor};
 
 // 定义常量
 const BINLOG_SYNC_LOCK_KEY: &str = "binlog:sync:lock";
@@ -179,18 +179,18 @@ impl BinlogSyncTimestampHolder {
 
     /// "受保护的作用域执行"
     /// 接收一个异步闭包，安全地执行它，并确保锁总是被释放。
-    pub async fn run_scoped_sync<F, Fut>(&self, operation: F) -> Result<()>
+    pub async fn run_scoped_sync<F, Fut>(&self, operation: F) -> Result<bool>
     where
         // 闭包接收 i64 (start_time)，返回一个 Future
         F: FnOnce(i64) -> Fut,
         // Future 的输出是 Result<i64>，其中 i64 是新的 end_time
-        Fut: Future<Output = Result<i64>>,
+        Fut: Future<Output = Result<(i64, bool)>>,
     {
         // 1. 先尝试获取锁
         if !self.acquire_lock().await? {
             // 如果获取锁失败，直接返回，不再执行后续逻辑
             warn!("Current task acquire lock is not acquired.");
-            return Ok(());
+            return Ok(false);
         }
 
         // 2. 将所有获取锁之后的操作，全部放入一个新的 async 块中
@@ -198,9 +198,9 @@ impl BinlogSyncTimestampHolder {
             // 2.1. 在安全区域内获取时间戳
             let start_timestamp = self.get_timestamp().await?;
             // 2.2. 执行传入的业务逻辑
-            let end_time = operation(start_timestamp).await?;
+            let (end_time, is_caught_up) = operation(start_timestamp).await?;
             self.save_timestamp(end_time).await?;
-            Ok(()) // 如果所有步骤都成功，返回 Ok
+            Ok(is_caught_up) // 如果所有步骤都成功，返回 Ok
         };
 
         // 3. 将业务逻辑（Future）包装在 AssertUnwindSafe 和 catch_unwind 中
@@ -216,9 +216,9 @@ impl BinlogSyncTimestampHolder {
         // 4. 根据执行结果进行处理
         match future_result {
             // 1: 所有工作都成功完成
-            Ok(Ok(_)) => {
+            Ok(Ok(is_caught_up)) => {
                 info!("Scoped operation and cleanup completed successfully.");
-                Ok(())
+                Ok(is_caught_up)
             }
             // 2: 工作中发生了可恢复的错误 (Err)
             Ok(Err(e)) => {
@@ -252,6 +252,10 @@ impl BinlogSyncTask {
             app_context,
             timestamp_holder,
         }
+    }
+
+    pub fn name(&self) -> &str {
+        "BinlogSyncTask"
     }
 
     /// 辅助函数：为指定的数据类型获取并处理所有 binlog 数据。
@@ -307,15 +311,24 @@ impl BinlogSyncTask {
         Ok(())
     }
 
-    pub async fn sync_data(&self) -> Result<()> {
+    pub async fn sync_data(&self) -> Result<bool> {
         // 一个业务逻辑的闭包
         let business_logic = |timestamp: i64| async move {
             info!("Executing sync logic with start_timestamp: {}", timestamp);
             let start_time = timestamp - 30_000; // 30 秒前
+            let five_minutes_later = timestamp + 300_000; // 5 分钟后
             let end_time = std::cmp::min(
-                timestamp + 300_000,                   // 5 分钟后
+                five_minutes_later,
                 chrono::Utc::now().timestamp_millis(), // 时间戳全球统一不区分时区
             );
+
+            // 如果 end_time < five_minutes_later，说明我们被 now 限制了，已经追上了。
+            let is_caught_up = end_time < five_minutes_later;
+            if is_caught_up {
+                info!("Binlog sync is caught up to the current time.");
+            } else {
+                info!("Binlog sync is processing historical data.");
+            }
 
             // 1. 为 Org 和 User 分别创建一个异步任务 Future
             let org_processing_future =
@@ -341,23 +354,10 @@ impl BinlogSyncTask {
             } else {
                 info!("User data processing completed.");
             }
-            // 业务逻辑成功完成，返回新的时间戳
-            Ok(end_time)
+            // 业务逻辑成功完成，返回新的时间戳以及"是否追上"的标志
+            Ok((end_time, is_caught_up))
         };
         // 调用“受保护的执行”
         self.timestamp_holder.run_scoped_sync(business_logic).await
-    }
-}
-
-#[async_trait::async_trait]
-impl TaskExecutor for BinlogSyncTask {
-    async fn execute(&self) -> Result<()> {
-        info!("Starting binlog sync task.");
-        // Execute Binlog sync
-        if let Err(e) = self.sync_data().await {
-            error!("Failed to sync data: {e:?}");
-        }
-        info!("Binlog sync task completed.");
-        Ok(())
     }
 }
