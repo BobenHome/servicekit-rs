@@ -1,12 +1,12 @@
 use crate::config::TasksConfig;
 use crate::schedule::binlog_sync::BinlogSyncTask;
 use crate::{
+    AppContext, TaskExecutor,
     schedule::{
         CompositeTask, PsnArchivePushTask, PsnArchiveScPushTask, PsnClassPushTask,
         PsnClassScPushTask, PsnLecturerPushTask, PsnLecturerScPushTask, PsnTrainingPushTask,
         PsnTrainingScPushTask,
     },
-    AppContext, TaskExecutor,
 };
 use anyhow::{Context, Result};
 use std::sync::Arc;
@@ -160,7 +160,9 @@ impl TaskSchedulerManager {
             loop {
                 info!("Starting a new cycle for continuous task '{task_name}'.");
                 if let Err(e) = task.execute().await {
-                    error!("Continuous task '{task_name}' failed: {e:?}. Waiting for 10 seconds before next cycle.");
+                    error!(
+                        "Continuous task '{task_name}' failed: {e:?}. Waiting for 10 seconds before next cycle."
+                    );
                     // 如果任务失败，等待一段时间再重试，避免因连续失败导致CPU空转或频繁攻击下游服务
                     sleep(Duration::from_secs(10)).await;
                 } else {

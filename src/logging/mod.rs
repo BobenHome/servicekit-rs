@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{Local, NaiveDate};
-use flate2::write::GzEncoder;
 use flate2::Compression;
+use flate2::write::GzEncoder;
 use std::fs::{self, File};
 use std::io::{self, BufReader};
 use std::path::{Path, PathBuf};
@@ -28,35 +28,31 @@ fn compress_old_logs(log_dir: &Path) -> Result<()> {
     for entry in entries {
         let entry = entry.context("Failed to read directory entry")?;
         let path = entry.path();
-        if path.is_file() && path.extension().map_or(false, |ext| ext == "log") {
-            if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
-                if let Some(date_str) = file_name
-                    .strip_prefix("app.")
-                    .and_then(|s| s.strip_suffix(".log"))
-                {
-                    if let Ok(file_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-                        if file_date < today {
-                            // 压缩文件为 .gz
-                            let gz_path = path.with_extension("log.gz");
-                            let input = File::open(&path)
-                                .context(format!("Failed to open {path:?} for compression"))?;
-                            let output = File::create(&gz_path)
-                                .context(format!("Failed to create {gz_path:?}"))?;
-                            let mut encoder = GzEncoder::new(output, Compression::default());
-                            let mut reader = BufReader::new(input);
-                            io::copy(&mut reader, &mut encoder)
-                                .context("Failed to copy data during compression")?;
-                            encoder.finish().context("Failed to finish GzEncoder")?;
 
-                            // 删除原文件
-                            fs::remove_file(&path)
-                                .context(format!("Failed to remove original file {path:?}"))?;
+        if path.is_file()
+            && path.extension().is_some_and(|ext| ext == "log")
+            && let Some(file_name) = path.file_name().and_then(|s| s.to_str())
+            && let Some(date_str) = file_name
+                .strip_prefix("app.")
+                .and_then(|s| s.strip_suffix(".log"))
+            && let Ok(file_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+            && file_date < today
+        {
+            // 压缩文件为 .gz
+            let gz_path = path.with_extension("log.gz");
+            let input =
+                File::open(&path).context(format!("Failed to open {path:?} for compression"))?;
+            let output = File::create(&gz_path).context(format!("Failed to create {gz_path:?}"))?;
+            let mut encoder = GzEncoder::new(output, Compression::default());
+            let mut reader = BufReader::new(input);
+            io::copy(&mut reader, &mut encoder)
+                .context("Failed to copy data during compression")?;
+            encoder.finish().context("Failed to finish GzEncoder")?;
 
-                            println!("INFO: Compressed old log file {path:?} to {gz_path:?}");
-                        }
-                    }
-                }
-            }
+            // 删除原文件
+            fs::remove_file(&path).context(format!("Failed to remove original file {path:?}"))?;
+
+            println!("INFO: Compressed old log file {path:?} to {gz_path:?}");
         }
     }
     Ok(())

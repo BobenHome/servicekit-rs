@@ -26,6 +26,33 @@ pub trait PsnDataWrapper: Send + Sync + 'static {
 
     // 新增：获取此 Wrapper 处理的 DynamicPsnData 的种类
     fn get_psn_data_kind_for_wrapper() -> PsnDataKind;
+
+    fn apply_query_filters<'a>(
+        mut query_builder: QueryBuilder<'a, MySql>,
+        query_type: QueryType,
+        date_column: &str,
+        id_column: &str,
+    ) -> QueryBuilder<'a, MySql> {
+        match query_type {
+            QueryType::ByDate(hit_date) => {
+                query_builder.push(" AND ");
+                query_builder.push(date_column);
+                query_builder.push(" = ");
+                query_builder.push_bind(hit_date);
+            }
+            QueryType::ByIds(ids) => {
+                query_builder.push(" AND ");
+                query_builder.push(id_column);
+                query_builder.push(" IN (");
+                let mut separated = query_builder.separated(", ");
+                for id in ids {
+                    separated.push_bind(id);
+                }
+                separated.push_unseparated(")");
+            }
+        }
+        query_builder
+    }
 }
 
 // 辅助函数：根据 PsnDataKind 类型获取 ClickHouse 表名
@@ -138,7 +165,9 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
             }
         } else {
             let psn_data_enum_name = psn_data_enum.get_key_name();
-            info!("Successfully sent data of type '{psn_data_enum_name}' to third party. Task: {task_display_name}");
+            info!(
+                "Successfully sent data of type '{psn_data_enum_name}' to third party. Task: {task_display_name}"
+            );
             success_ids.push(current_id);
             // 成功后调用小助手接口，写入归档成功的班级
             if let DynamicPsnData::Class(class_data) = psn_data_enum {
@@ -150,7 +179,9 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
                     )
                     .await;
             } else {
-                info!("Skipping gateway service invocation for data of type '{psn_data_enum_name}'. Only 'Class' data is processed by gateway.");
+                info!(
+                    "Skipping gateway service invocation for data of type '{psn_data_enum_name}'. Only 'Class' data is processed by gateway."
+                );
             }
         }
     }
@@ -237,8 +268,8 @@ pub async fn execute_push_task_logic<W: PsnDataWrapper>(base_task: &BasePsnPushT
         // 只有 PsnDataKind::Lecturer 类型需要更新 trainNotifyMssMessage 字段
         let update_message_field = psn_data_kind == PsnDataKind::Lecturer; // <--- 根据类型设置此标志
         info!(
-                "Attempting MySQL updates for PsnDataKind::{psn_data_kind:?} (Table: '{mysql_table}', ID Column: '{mysql_id_column}', Update message field: {update_message_field})."
-            );
+            "Attempting MySQL updates for PsnDataKind::{psn_data_kind:?} (Table: '{mysql_table}', ID Column: '{mysql_id_column}', Update message field: {update_message_field})."
+        );
 
         // 处理成功 ID 的 MySQL 更新
         if !success_ids.is_empty() {
@@ -342,7 +373,8 @@ pub async fn update_notify_mss_mysql(
     let query = query_builder.build();
 
     info!(
-        "Executing MySQL update query for table '{table_name}', ID column '{id_column}'. Status: {status}, Items count: {}, Update message field: {update_message_field}", items.len()
+        "Executing MySQL update query for table '{table_name}', ID column '{id_column}'. Status: {status}, Items count: {}, Update message field: {update_message_field}",
+        items.len()
     );
     // 打印构建的 SQL 语句和绑定参数，便于调试验证
     info!("Built MySQL update query: {}", query.sql());
