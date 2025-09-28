@@ -1,7 +1,7 @@
 [package]
 name = "servicekit"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 actix-web = "4.11"
@@ -18,7 +18,6 @@ tracing-subscriber = { version = "0.3", features = [
     "ansi",
 ] } # env-filter 用于从环境变量控制日志级别，fmt 用于格式化输出
 tracing-appender = "0.2" # 用于文件输出和轮转
-tracing-log = "0.2" # 将 log::* 宏桥接到 tracing
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rust_decimal = { version = "1.37", features = ["serde"] }
@@ -28,7 +27,6 @@ sqlx = { version = "0.8.6", features = [
     "chrono",
     "rust_decimal",
 ] }
-cron = "0.15.0"
 chrono-tz = "0.10.4"
 tokio-cron-scheduler = "0.14.0"
 uuid = { version = "1.18.0", features = ["v4"] }
@@ -46,6 +44,7 @@ redis = { version = "0.32", features = ["tokio-comp", "connection-manager"] }
 itertools = "0.14.0"
 thiserror = "2"
 regex = "1"
+flate2 = "1"
 [[bin]]
 name = "servicekit"
 path = "src/main.rs"
