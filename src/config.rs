@@ -1,7 +1,8 @@
+use config::{Config, ConfigError, Environment, File};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-
-use serde::Deserialize;
+use tracing::info;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AppConfig {
@@ -81,10 +82,22 @@ pub struct RedisConfig {
 }
 
 impl AppConfig {
-    pub fn new() -> Result<Self, config::ConfigError> {
-        let builder = config::Config::builder()
-            .add_source(config::File::with_name("config/default.toml"))
-            .add_source(config::Environment::with_prefix("APP").separator("__")); // 允许环境变量覆盖 (例如: APP__TASKS__PSN_TRAIN_PUSH__CRON_SCHEDULE)
+    pub fn new() -> Result<Self, ConfigError> {
+        // 检测环境：dev 或 release
+        // 支持环境变量覆盖启动 RUST_ENV=staging cargo run
+        let env = std::env::var("RUST_ENV").unwrap_or_else(|_| {
+            if cfg!(debug_assertions) {
+                "dev".to_string()
+            } else {
+                "release".to_string()
+            }
+        });
+        let config_file = format!("config/{}.toml", env);
+        info!("Loading configuration from: {}", config_file);
+
+        let builder = Config::builder()
+            .add_source(File::with_name(&config_file))
+            .add_source(Environment::with_prefix("APP").separator("__")); // 允许环境变量覆盖 (例如: APP__TASKS__PSN_TRAIN_PUSH__CRON_SCHEDULE)
 
         // 使用 try_deserialize 来直接反序列化为 RawAppConfig
         // 在反序列化后手动将相关字段包装到 Arc 中，并返回 AppConfig
