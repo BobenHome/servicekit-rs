@@ -1,10 +1,10 @@
+use crate::AppContext;
 use crate::binlog::processor::{
-    clean_field, DataProcessorTrait, MergeableProcessedData, ProcessingState, Transition,
+    DataProcessorTrait, MergeableProcessedData, ProcessingState, Transition, clean_field,
 };
 use crate::schedule::binlog_sync::{EntityMetaInfo, ModifyOperationLog};
-use crate::utils::{mysql_client, MapToProcessError, ProcessError};
-use crate::AppContext;
-use anyhow::{anyhow, Result};
+use crate::utils::{MapToProcessError, ProcessError, mysql_client};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use itertools::Itertools;
@@ -37,6 +37,7 @@ pub struct TelecomUser {
     pub org: Option<String>,
     pub status: Option<i32>,
     pub contact_info: Option<ContactInfo>,
+    pub job_info: Option<JobInfo>,
     pub effective_time_start: Option<i64>,
     pub effective_time_end: Option<i64>,
     pub archives_info: Option<ArchivesInfo>,
@@ -111,12 +112,25 @@ impl ArchivesInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobInfo {
+    pub positive_date: Option<i32>,
+    pub special_job_years: Option<i32>,
+    pub work_date: Option<i64>,
+    pub leave_date: Option<i32>,
+    pub is_special_job: Option<bool>,
+    pub work_age: Option<i32>,
+    pub is_core_staff: Option<bool>,
+    #[serde(rename = "enterunit_date")]
+    pub enter_unit_date: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserExt {
     pub base_station: Option<BaseStation>,
     pub it_info: Option<Vec<Value>>,
     pub pe_info: Option<Vec<Value>>,
     pub pro_info: Option<Vec<Value>>,
-    pub job_info: Option<JobInfo>,
+    pub job_info: Option<ExtJobInfo>,
     pub name_card: Option<NameCard>,
     pub weight: Option<f32>,
     pub is_activated: Option<bool>,
@@ -142,7 +156,7 @@ pub struct NameCard {
     pub name: Option<String>,
     pub company: Option<String>,
     pub company_id: Option<String>,
-    #[serde(rename = "companyphone")]
+    #[serde(rename = "companyPhone")]
     pub company_phone: Option<String>,
     pub organization: Option<String>,
     pub station: Option<String>,
@@ -165,7 +179,7 @@ impl NameCard {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JobInfo {
+pub struct ExtJobInfo {
     pub post_name: Option<String>,
     #[serde(rename = "jobStatus")]
     pub job_status: Option<String>,
@@ -175,16 +189,6 @@ pub struct JobInfo {
     pub hr_job_type: Option<String>,
     #[serde(rename = "jobCategory")]
     pub job_category: Option<String>,
-
-    pub positive_date: Option<i32>,
-    pub special_job_years: Option<i32>,
-    pub work_date: Option<i64>,
-    pub special_job: Option<String>,
-    pub leave_date: Option<i32>,
-    pub work_age: Option<i32>,
-    pub is_core_staff: Option<String>,
-    #[serde(rename = "enterunit_date")]
-    pub enter_unit_date: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -315,10 +319,11 @@ impl From<TelecomUser> for InsertTelecomUser {
         user.trim();
 
         let base_station = (|| user.ext.as_ref()?.base_station.as_ref())();
-        let job_info = (|| user.ext.as_ref()?.job_info.as_ref())();
+        let ext_job_info = (|| user.ext.as_ref()?.job_info.as_ref())();
         let name_card = (|| user.ext.as_ref()?.name_card.as_ref())();
         let archives_info = user.archives_info.as_ref();
         let contact_info = user.contact_info.as_ref();
+        let job_info = user.job_info.as_ref();
 
         Self {
             // Base Station Fields
@@ -330,18 +335,21 @@ impl From<TelecomUser> for InsertTelecomUser {
             base_station_grade: base_station.and_then(|bs| bs.grade.clone()),
             base_station_name: base_station.and_then(|bs| bs.name.clone()),
 
+            // Ext Job Info Fields
+            ext_job_info_jobstatus: ext_job_info.and_then(|eji| eji.job_status.clone()),
+            ext_job_info_jobcategory: ext_job_info.and_then(|eji| eji.job_category.clone()),
+            ext_job_info_hrjobtype: ext_job_info.and_then(|eji| eji.hr_job_type.clone()),
+            ext_job_info_jobtype: ext_job_info.and_then(|eji| eji.job_type.clone()),
+
             // Job Info Fields
-            ext_job_info_jobstatus: job_info.and_then(|ji| ji.job_status.clone()),
-            ext_job_info_jobcategory: job_info.and_then(|ji| ji.job_category.clone()),
-            ext_job_info_hrjobtype: job_info.and_then(|ji| ji.hr_job_type.clone()),
-            ext_job_info_jobtype: job_info.and_then(|ji| ji.job_type.clone()),
             job_info_positive_date: job_info.and_then(|ji| ji.positive_date),
             job_info_special_job_years: job_info.and_then(|ji| ji.special_job_years),
             job_info_work_date: job_info.and_then(|ji| ji.work_date),
-            job_info_is_special_job: job_info.and_then(|ji| ji.special_job.clone()),
+            job_info_is_special_job: job_info
+                .and_then(|ji| ji.is_special_job.map(|b| b.to_string())),
             job_info_leave_date: job_info.and_then(|ji| ji.leave_date),
             job_info_work_age: job_info.and_then(|ji| ji.work_age),
-            job_info_is_core_staff: job_info.and_then(|ji| ji.is_core_staff.clone()),
+            job_info_is_core_staff: job_info.and_then(|ji| ji.is_core_staff.map(|b| b.to_string())),
             job_info_enterunit_date: job_info.and_then(|ji| ji.enter_unit_date),
 
             // Name Card Fields
@@ -364,9 +372,9 @@ impl From<TelecomUser> for InsertTelecomUser {
             // Archives Info Fields
             archives_info_birthday: archives_info.and_then(|ai| ai.birthday),
             archives_info_isonlychild: archives_info
-                .and_then(|ai| ai.is_only_child.map(|b| b.to_string()).clone()),
+                .and_then(|ai| ai.is_only_child.map(|b| b.to_string())),
             archives_info_is_union_members: archives_info
-                .and_then(|ai| ai.is_union_members.map(|b| b.to_string()).clone()),
+                .and_then(|ai| ai.is_union_members.map(|b| b.to_string())),
             archives_info_major: archives_info.and_then(|ai| ai.major.clone()),
             archives_info_folk: archives_info.and_then(|ai| ai.folk.clone()),
             archives_info_join_union_date: archives_info.and_then(|ai| ai.join_union_date),
@@ -388,7 +396,7 @@ impl From<TelecomUser> for InsertTelecomUser {
             loginname: user.loginname,
             org: user.org,
             is_ehr_sync: user.is_ehr_sync.map(|b| b.to_string()),
-            photo: None,
+            photo: user.photo,
             effective_time_end: user.effective_time_end,
             user_group_ids: user.user_group_ids.map(|ids| ids.join(",")),
             d_delete: user.delete.map(|b| b.to_string()),
@@ -461,7 +469,7 @@ pub struct TelecomMssUser {
     #[serde(rename = "jobCategory")]
     pub job_category: Option<String>,
     pub telephone: Option<String>,
-    #[serde(rename = "standByAccount")]
+    #[serde(rename = "standbyAccount")]
     pub stand_by_account: Option<String>,
 }
 
