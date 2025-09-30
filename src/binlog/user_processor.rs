@@ -1097,8 +1097,6 @@ impl DataProcessorTrait for UserDataProcessor {
             &data.user_ids_to_delete,
         )
         .await?;
-        info!("hr_codes_to_delete: {:?}", &data.hr_codes_to_delete);
-        info!("job_numbers_to_delete: {:?}", &data.job_numbers_to_delete);
         mysql_client::batch_delete(&mut tx, "d_mss_user", "HRCODE", &data.hr_codes_to_delete)
             .await?;
         mysql_client::batch_delete(
