@@ -72,11 +72,14 @@ pub fn init_logging() -> Result<WorkerGuard> {
     let log_dir = PathBuf::from("logs");
     fs::create_dir_all(&log_dir).context(format!("Failed to create log directory: {log_dir:?}"))?;
 
-    // 新增：初始化时压缩旧日志文件
-    if let Err(e) = compress_old_logs(&log_dir) {
-        eprintln!("Warning: Failed to compress old logs: {e:?}");
-        // 不中断初始化，继续
-    }
+    // 新增：初始化时压缩旧日志文件，启动后台线程压缩旧日志文件，不阻塞主线程
+    let log_dir_clone = log_dir.clone();
+    tokio::spawn(async move {
+        if let Err(e) = compress_old_logs(&log_dir_clone) {
+            eprintln!("Warning: Failed to compress old logs: {e:?}");
+        }
+        println!("INFO: Old logs compression completed in background.");
+    });
 
     // 使用 tracing-appender 创建按天轮转的文件 appender
     let appender = RollingFileAppender::builder()
