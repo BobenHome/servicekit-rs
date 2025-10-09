@@ -18,6 +18,7 @@ tracing-subscriber = { version = "0.3", features = [
     "ansi",
 ] } # env-filter 用于从环境变量控制日志级别，fmt 用于格式化输出
 tracing-appender = "0.2" # 用于文件输出和轮转
+logroller = "0.1" # 由于tracing-appender还不支持本地时区轮转，logroller支持本地时区轮转
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rust_decimal = { version = "1.37", features = ["serde"] }

@@ -1,12 +1,10 @@
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDate};
-use flate2::Compression;
-use flate2::write::GzEncoder;
-use std::fs::{self, File};
-use std::io::{self, BufReader};
-use std::path::{Path, PathBuf};
+use chrono::Local;
+use logroller::{Compression, LogRollerBuilder, Rotation, RotationAge, TimeZone};
+use std::fs::{self};
+use std::path::PathBuf;
+
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::{self, filter::EnvFilter, fmt, prelude::*, util::SubscriberInitExt};
@@ -18,44 +16,6 @@ impl FormatTime for LocalTimer {
     fn format_time(&self, w: &mut Writer<'_>) -> std::fmt::Result {
         write!(w, "{}", Local::now().format("%Y-%m-%d %H:%M:%S%.3f"))
     }
-}
-
-// 新增：压缩旧日志文件的函数
-fn compress_old_logs(log_dir: &Path) -> Result<()> {
-    let today = Local::now().date_naive();
-    let entries = fs::read_dir(log_dir).context("Failed to read log directory")?;
-
-    for entry in entries {
-        let entry = entry.context("Failed to read directory entry")?;
-        let path = entry.path();
-
-        if path.is_file()
-            && path.extension().is_some_and(|ext| ext == "log")
-            && let Some(file_name) = path.file_name().and_then(|s| s.to_str())
-            && let Some(date_str) = file_name
-                .strip_prefix("app.")
-                .and_then(|s| s.strip_suffix(".log"))
-            && let Ok(file_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-            && file_date < today
-        {
-            // 压缩文件为 .gz
-            let gz_path = path.with_extension("log.gz");
-            let input =
-                File::open(&path).context(format!("Failed to open {path:?} for compression"))?;
-            let output = File::create(&gz_path).context(format!("Failed to create {gz_path:?}"))?;
-            let mut encoder = GzEncoder::new(output, Compression::default());
-            let mut reader = BufReader::new(input);
-            io::copy(&mut reader, &mut encoder)
-                .context("Failed to copy data during compression")?;
-            encoder.finish().context("Failed to finish GzEncoder")?;
-
-            // 删除原文件
-            fs::remove_file(&path).context(format!("Failed to remove original file {path:?}"))?;
-
-            println!("INFO: Compressed old log file {path:?} to {gz_path:?}");
-        }
-    }
-    Ok(())
 }
 
 // =====================================================================
@@ -72,22 +32,15 @@ pub fn init_logging() -> Result<WorkerGuard> {
     let log_dir = PathBuf::from("logs");
     fs::create_dir_all(&log_dir).context(format!("Failed to create log directory: {log_dir:?}"))?;
 
-    // 新增：初始化时压缩旧日志文件，启动后台线程压缩旧日志文件，不阻塞主线程
-    let log_dir_clone = log_dir.clone();
-    tokio::spawn(async move {
-        if let Err(e) = compress_old_logs(&log_dir_clone) {
-            eprintln!("Warning: Failed to compress old logs: {e:?}");
-        }
-        println!("INFO: Old logs compression completed in background.");
-    });
-
-    // 使用 tracing-appender 创建按天轮转的文件 appender
-    let appender = RollingFileAppender::builder()
-        .rotation(Rotation::DAILY) // 按本地日期每天轮转
-        .filename_prefix("app") // 前缀：app
-        .filename_suffix("log") // 后缀：log（结果：app.YYYY-MM-DD.log）
-        .build(&log_dir) // 日志目录
-        .context("Failed to build rolling file appender")?;
+    // 使用 logroller 创建按本地时区每天轮转的文件 appender
+    let appender = LogRollerBuilder::new("logs", "app") // 目录和基础文件名（会生成 app.YYYY-MM-DD.log）
+        .rotation(Rotation::AgeBased(RotationAge::Daily)) // 每天轮转
+        .suffix("log".to_string())
+        .time_zone(TimeZone::Local) // 使用本地时区（东八区）
+        .compression(Compression::Gzip) // 自动压缩旧文件为 .gz
+        .max_keep_files(30) // 可选：保留最近 30 个文件，防止无限增长
+        .build()
+        .context("Failed to build logroller appender")?;
 
     // 创建非阻塞 writer（异步写入）
     let (non_blocking, guard) = tracing_appender::non_blocking(appender);
