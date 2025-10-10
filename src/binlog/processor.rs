@@ -7,7 +7,7 @@ use std::fmt::Debug;
 use tracing::{error, info};
 
 // 最大重试次数
-const MAX_RETRIES: u32 = 3;
+const MAX_RETRIES: u32 = 10;
 
 pub fn clean_field(field: &mut Option<String>) {
     if let Some(s) = field.as_mut() {
