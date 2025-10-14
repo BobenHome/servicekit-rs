@@ -45,7 +45,6 @@ redis = { version = "0.32", features = ["tokio-comp", "connection-manager"] }
 itertools = "0.14.0"
 thiserror = "2"
 regex = "1"
-flate2 = "1"
 [[bin]]
 name = "servicekit"
 path = "src/main.rs"

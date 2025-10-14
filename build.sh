@@ -34,8 +34,23 @@ cp -r config "$TEMP_DIR/"
 
 # 压缩为 tar.gz，文件名包含版本号
 OUTPUT_FILE="servicekit-v$VERSION.tar.gz"
-tar -czf "$OUTPUT_FILE" -C "$TEMP_DIR" servicekit config
-echo "已生成 $OUTPUT_FILE"
+# 检测 macOS 并应用跨平台兼容修复（使用环境变量，避免 BSD tar 选项不支持）--owner=0 --group=0 选项是设置文件权限为root
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "检测到 macOS，使用 no-xattrs disable-copyfile  禁用 Apple 元数据（零警告跨平台）"
+    tar --no-xattrs --disable-copyfile --owner=0 --group=0 -czf "$OUTPUT_FILE" -C "$TEMP_DIR" servicekit config
+else
+    echo "非 macOS 环境，直接打包"
+    tar --owner=0 --group=0 -czf "$OUTPUT_FILE" -C "$TEMP_DIR" servicekit config
+fi
+
+# 验证 tar 内容（业务安全检查）
+if ! tar -tzf "$OUTPUT_FILE" | grep -q "servicekit"; then
+    echo "错误：tar 内容验证失败（缺少 servicekit）"
+    rm -rf "$OUTPUT_FILE"
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
+echo "已生成 $OUTPUT_FILE (大小: $(du -h "$OUTPUT_FILE" | cut -f1))"
 
 # 清理临时目录
 rm -rf "$TEMP_DIR"

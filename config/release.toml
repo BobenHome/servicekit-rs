@@ -1,5 +1,5 @@
 # 数据库配置
-database_url = "mysql://dxxy:dreamsoft@2020@172.25.1.65:33063/dxxy"
+database_url = "mysql://dxxy:dreamsoft@2020@172.25.1.175:3306/dxxy"
 
 # Web 服务器端口
 web_server_port = 8084

@@ -1,10 +1,10 @@
+use crate::AppContext;
 use crate::binlog::processor::{
     DataProcessorTrait, MergeableProcessedData, ProcessingState, Transition,
 };
 use crate::schedule::binlog_sync::{EntityMetaInfo, ModifyOperationLog};
 use crate::utils::ProcessError;
-use crate::utils::{mysql_client, MapToProcessError};
-use crate::AppContext;
+use crate::utils::{MapToProcessError, mysql_client};
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
@@ -24,8 +24,11 @@ fn get_city_clean_re() -> &'static Regex {
         Regex::new(r"(分公司|电信分公司\*|中国电信股份有限公司|市|分公司\*|中国电信)").unwrap()
     })
 }
-// 浙江特殊情况，第6个元素还是浙江，要取第7个元素
-const SPECIAL_CITY_MARKER: &str = "4843217f-e083-44a4-adc3-c85f25448af8";
+const SPECIAL_PROVINCE_MARKER: [&str; 3] = [
+    "4843217f-e083-44a4-adc3-c85f25448af8", // 浙江
+    "a169c4a4-5c71-40bb-8aba-a20f1fb0a23c", // 总部及直属
+    "5ab5d8dd-2861-45f2-af26-f0ce1d99016a", // 通信服务
+];
 
 type Transition_ = Transition<TelecomOrg, TelecomOrgTree, TelecomMssOrgMapping, TelecomMssOrg>;
 
@@ -312,33 +315,32 @@ impl OrgDataProcessor {
             let mut p_code: Option<String> = None;
             let mut province_name: Option<String> = None;
             let mut c_code: Option<String> = None;
-            let mut city_index: usize = 5; // 默认取第6个元素（索引5）
+            let mut province_index: usize = 4; // 省份默认取第5个元素（索引4）
 
             if let Some(path) = &org.full_path_id {
                 let parts: Vec<&str> = path.split(',').collect();
-                // 提取 省份ID (P_CODE)，它是路径中的第5个元素 (索引为4)
-                if let Some(province_id_str) = parts.get(4) {
-                    // 查找省份名称
-                    province_name = self.app_context.provinces.get(*province_id_str).cloned();
-                    p_code = Some(province_id_str.to_string());
-                }
-
-                // 决定用于城市的索引，并提取 c_code
-                match parts.get(5) {
-                    Some(candidate) if *candidate == SPECIAL_CITY_MARKER => {
-                        // 特殊标记：尝试使用索引6作为真正的城市 code
-                        city_index = 6;
-                        c_code = parts.get(6).map(|s| s.to_string());
+                // 决定用于省份的索引，并提取 p_code
+                match parts.get(province_index) {
+                    Some(candidate) if SPECIAL_PROVINCE_MARKER.contains(candidate) => {
+                        // 特殊标记：尝试使用索引5作为真正的省份 code
+                        province_index = 5;
+                        p_code = parts.get(province_index).map(|s| s.to_string());
                     }
                     Some(candidate) => {
-                        city_index = 5;
-                        c_code = Some(candidate.to_string());
+                        p_code = Some(candidate.to_string());
                     }
                     None => {
-                        // 索引5不存在，保持默认 city_index = 5，c_code = None
-                        c_code = None;
+                        // 索引 province_index 不存在，保持默认 province_index = 4，p_code = None
+                        p_code = None;
                     }
                 }
+
+                // 获取城市编码，城市的索引肯定是省份索引+1
+                c_code = parts.get(province_index + 1).map(|s| s.to_string());
+            }
+
+            if let Some(ref code) = p_code {
+                province_name = self.app_context.provinces.get(code.as_str()).cloned();
             }
 
             let full_path_name_parts: Option<Vec<&str>> = org
@@ -348,12 +350,12 @@ impl OrgDataProcessor {
             if province_name.is_none() {
                 // 如果 province_name 仍为 None，则取 full_path_name 索引为4的名称
                 if let Some(parts) = &full_path_name_parts {
-                    province_name = parts.get(4).map(|name| name.to_string());
+                    province_name = parts.get(province_index).map(|name| name.to_string());
                 }
             }
             let city_name = full_path_name_parts.as_ref().and_then(|parts| {
                 parts
-                    .get(city_index)
+                    .get(province_index + 1)
                     .map(|s| get_city_clean_re().replace_all(s.trim(), "").to_string())
             });
 
