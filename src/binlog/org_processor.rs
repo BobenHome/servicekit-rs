@@ -1,14 +1,15 @@
-use crate::AppContext;
 use crate::binlog::processor::{
     DataProcessorTrait, MergeableProcessedData, ProcessingState, Transition,
 };
 use crate::schedule::binlog_sync::{EntityMetaInfo, ModifyOperationLog};
 use crate::utils::ProcessError;
-use crate::utils::{MapToProcessError, mysql_client};
+use crate::utils::{mysql_client, MapToProcessError};
+use crate::AppContext;
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use itertools::Itertools; // 使用 itertools::Itertools::unique_by 来去重
+use itertools::Itertools;
+// 使用 itertools::Itertools::unique_by 来去重
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sqlx::{Execute, MySql, QueryBuilder, Transaction};
@@ -24,10 +25,11 @@ fn get_city_clean_re() -> &'static Regex {
         Regex::new(r"(分公司|电信分公司\*|中国电信股份有限公司|市|分公司\*|中国电信)").unwrap()
     })
 }
-const SPECIAL_PROVINCE_MARKER: [&str; 3] = [
+const SPECIAL_PROVINCE_MARKER: [&str; 4] = [
     "4843217f-e083-44a4-adc3-c85f25448af8", // 浙江
     "a169c4a4-5c71-40bb-8aba-a20f1fb0a23c", // 总部及直属
     "5ab5d8dd-2861-45f2-af26-f0ce1d99016a", // 通信服务
+    "2ce4af65-c2c8-40d4-a784-848b55451b12", // 中国电信国际公司
 ];
 
 type Transition_ = Transition<TelecomOrg, TelecomOrgTree, TelecomMssOrgMapping, TelecomMssOrg>;

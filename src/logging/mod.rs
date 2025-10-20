@@ -4,12 +4,11 @@ use logroller::{Compression, LogRollerBuilder, Rotation, RotationAge, TimeZone};
 use std::fs::{self};
 use std::path::PathBuf;
 
-use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::{self, filter::EnvFilter, fmt, prelude::*, util::SubscriberInitExt};
 
-// 自定义本地时间格式，保持不变
+// 自定义本地时间格式
 pub struct LocalTimer;
 
 impl FormatTime for LocalTimer {
@@ -28,7 +27,7 @@ impl FormatTime for LocalTimer {
 /// - 控制台输出层，使用本地时间、线程ID/名称、文件名/行号和日志级别。
 /// - 文件输出层，使用 tracing-appender 按天轮转（文件名如 app.YYYY-MM-DD.log），并在初始化时压缩旧日志文件。
 /// - 注意：压缩使用 Gz 格式，仅在初始化时执行（不实时）。
-pub fn init_logging() -> Result<WorkerGuard> {
+pub fn init_logging() -> Result<()> {
     let log_dir = PathBuf::from("logs");
     fs::create_dir_all(&log_dir).context(format!("Failed to create log directory: {log_dir:?}"))?;
 
@@ -43,7 +42,7 @@ pub fn init_logging() -> Result<WorkerGuard> {
         .context("Failed to build logroller appender")?;
 
     // 创建非阻塞 writer（异步写入）
-    let (non_blocking, guard) = tracing_appender::non_blocking(appender);
+    let (non_blocking, _) = tracing_appender::non_blocking(appender);
 
     // 创建一个 fmt 层用于文件输出
     let file_layer = fmt::layer()
@@ -75,5 +74,5 @@ pub fn init_logging() -> Result<WorkerGuard> {
         .with(file_layer)
         .init();
 
-    Ok(guard)
+    Ok(())
 }
