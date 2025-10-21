@@ -1,12 +1,12 @@
 use crate::config::TasksConfig;
 use crate::schedule::binlog_sync::BinlogSyncTask;
 use crate::{
-    AppContext, TaskExecutor,
     schedule::{
         CompositeTask, PsnArchivePushTask, PsnArchiveScPushTask, PsnClassPushTask,
         PsnClassScPushTask, PsnLecturerPushTask, PsnLecturerScPushTask, PsnTrainingPushTask,
         PsnTrainingScPushTask,
-    },
+    }, AppContext,
+    TaskExecutor,
 };
 use anyhow::{Context, Result};
 use std::sync::Arc;

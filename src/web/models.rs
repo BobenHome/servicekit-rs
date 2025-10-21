@@ -1,3 +1,4 @@
+use crate::schedule::binlog_sync::DataType;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -44,6 +45,12 @@ impl PushDataParams {
             (false, true) => Ok(()), // 只提供了 trainIds，合理
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BinlogParams {
+    pub ids: Vec<String>, // 用户uid或者组织id
+    pub data_type: DataType,
 }
 
 #[derive(Debug, Serialize)]

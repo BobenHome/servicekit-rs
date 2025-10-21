@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use crate::{web::handlers, AppContext};
+use crate::{web::binlog_handlers, web::mss_handlers, AppContext};
 use actix_web::{middleware, web, App, HttpServer};
-use anyhow::{Context, Result}; // 导入 anyhow::Result 和 Context trait
+use anyhow::{Context, Result};
 use tracing::info;
 
 pub struct WebServer {
@@ -27,7 +27,8 @@ impl WebServer {
                 .wrap(middleware::Compress::default()) // 启用响应压缩
                 .service(
                     web::scope("/api") // 创建一个 /api 范围
-                        .service(handlers::push_mss), // 注册处理函数
+                        .service(mss_handlers::push_mss) // 注册处理函数
+                        .service(binlog_handlers::binlog_sync),
                 )
         })
         .bind(("127.0.0.1", self.port))

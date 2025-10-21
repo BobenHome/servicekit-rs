@@ -1,6 +1,6 @@
 use crate::binlog::processor::DataProcessorTrait;
 use anyhow::{Context, Result};
-use futures::FutureExt; // 引入 catch_unwind
+use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use sqlx::{MySqlPool, Row};
 use std::future::Future;
@@ -9,9 +9,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
-use crate::AppContext;
 use crate::binlog::{OrgDataProcessor, UserDataProcessor};
 use crate::utils::redis::{RedisLock, RedisMgr};
+use crate::AppContext;
 
 // 定义常量
 const BINLOG_SYNC_LOCK_KEY: &str = "binlog:sync:lock";
@@ -77,7 +77,7 @@ impl Page {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModifyOperationLog {
     pub id: String,
     pub app_id: u32,
@@ -93,7 +93,7 @@ pub struct ModifyOperationLog {
     pub entity_meta_info: Option<EntityMetaInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EntityMetaInfo {
     #[serde(rename = "dateCreated")]
     pub date_created: Option<i64>,
@@ -288,7 +288,9 @@ impl BinlogSyncTask {
         }
 
         // 2. 获取完所有数据后，分发给对应的处理器
-        if !all_items_for_type.is_empty() {
+        if all_items_for_type.is_empty() {
+            warn!("No results set for type {data_type:?}");
+        } else {
             let items_len = all_items_for_type.len();
             info!("Retrieved {items_len} records for type {data_type:?}, starting processing...");
             match data_type {
@@ -305,8 +307,6 @@ impl BinlogSyncTask {
                     warn!("Unknown or unsupported DataType for processing: {data_type:?}");
                 }
             }
-        } else {
-            warn!("No results set for type {data_type:?}");
         }
         Ok(())
     }
@@ -342,7 +342,6 @@ impl BinlogSyncTask {
                 tokio::join!(org_processing_future, user_processing_future);
 
             // 3. 分别处理两个任务的结果
-            //    注意：我们只记录错误，不中断整个同步流程，这与您之前的逻辑一致
             if let Err(e) = org_result {
                 error!("Error occurred while processing organization data: {e:?}");
             } else {
