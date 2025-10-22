@@ -41,6 +41,12 @@ pub async fn get_kv(mgr: &RedisMgr, key: &str) -> Result<Option<String>> {
     Ok(v)
 }
 
+pub async fn del_kv(mgr: &RedisMgr, key: &str) -> Result<Option<usize>> {
+    let mut conn = mgr.clone();
+    let v: Option<usize> = conn.del(key).await?;
+    Ok(v)
+}
+
 /// 分布式锁的实现（返回 token，调用者持有 token 用于释放）
 pub struct RedisLock {
     pub key: String,

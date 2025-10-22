@@ -33,4 +33,5 @@ pub use mappers::archiving_mss_mapper::{ArchivingMssMapper, RecordMssReply};
 pub use parsers::push_result_parser::PushResultParser;
 
 pub use context::AppContext;
+pub use context::RedisContext;
 pub use utils::mss_client::psn_dos_push;

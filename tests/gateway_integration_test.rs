@@ -3,7 +3,8 @@ use servicekit::{
     logging::LocalTimer, schedule::binlog_sync::BinlogSyncTask, AppConfig, AppContext,
 };
 
-use servicekit::utils::redis::{RedisLock, RedisMgr};
+use servicekit::context::RedisContext;
+use servicekit::utils::redis::{del_kv, get_kv, set_kv, RedisLock, RedisMgr};
 use servicekit::utils::MapToProcessError;
 use std::sync::{Arc, Once};
 use std::time::Duration;
@@ -37,6 +38,7 @@ fn setup_logging_for_tests() {
 
 // #[tokio::test] 宏用于运行异步测试
 #[tokio::test]
+#[ignore]
 async fn test_invoke_gateway_service_real_success() -> Result<()> {
     // 1. 在每个测试函数的开头调用日志初始化
     setup_logging_for_tests();
@@ -59,24 +61,26 @@ async fn test_invoke_gateway_service_real_success() -> Result<()> {
     match binlog_sync_task.sync_data().await.map_gateway_err() {
         Ok(_result) => {}
         Err(err) => {
-            panic!("Failed to sync data: {}", err);
+            panic!("Failed to sync data: {err}");
         }
     }
 
-    if false {
-        // 永远不执行
-        servicekit::utils::redis::set_kv(
-            &app_context_arc.redis_mgr.clone(),
-            "name",
-            "apple",
-            Some(60),
-        )
-            .await?;
-        let redis_value =
-            servicekit::utils::redis::get_kv(&app_context_arc.redis_mgr.clone(), "name").await?;
-        info!("Redis value: {:?}", redis_value);
-    }
+    Ok(())
+}
 
+#[tokio::test]
+#[ignore]
+async fn test_redis_set_kev() -> Result<()> {
+    setup_logging_for_tests();
+    let app_config = AppConfig::new().context("Failed to load application configuration")?;
+    let redis_context = RedisContext::new(Arc::clone(&app_config.redis_config)).await?;
+
+    set_kv(&redis_context.redis_mgr, "name", "apple", Some(60)).await?;
+    let redis_value = get_kv(&redis_context.redis_mgr, "name").await?;
+    info!("Redis value: {redis_value:?}");
+    tokio::time::sleep(Duration::from_millis(10000)).await;
+    let del_num = del_kv(&redis_context.redis_mgr, "name").await?;
+    info!("Redis deleted del_num: {del_num:?}");
     Ok(())
 }
 

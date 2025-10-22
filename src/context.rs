@@ -75,3 +75,18 @@ impl AppContext {
         })
     }
 }
+
+#[derive(Clone)]
+pub struct RedisContext {
+    pub redis_mgr: RedisMgr,
+}
+
+impl RedisContext {
+    pub async fn new(redis_config: Arc<RedisConfig>) -> Result<Self> {
+        let redis_mgr: RedisMgr = init_redis(&redis_config.url)
+            .await
+            .context("Failed to initialize Redis ConnectionManager")?;
+        info!("Redis ConnectionManager initialized.");
+        Ok(Self { redis_mgr })
+    }
+}
