@@ -6,10 +6,10 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    info!("Application starting...");
     // 1. 初始化日志系统
     // 主线程需持有guard，不然guard会在init_logging调用完后drop掉导致 worker 线程立即停止（不会写日志到文件中）
     let _guard = logging::init_logging().context("Failed to initialize logging")?;
+    info!("Application starting...");
 
     // 2. 加载应用程序配置
     let app_config = AppConfig::new().context("Failed to load application configuration")?;
