@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
-use log::info;
 use serde::Serialize;
 use sqlx::MySqlPool;
+use tracing::info;
 
 #[derive(Debug, Clone, Serialize)] // Serialize for eventual logging/db storage if needed
 pub struct RecordMssReply {

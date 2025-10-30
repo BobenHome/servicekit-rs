@@ -8,7 +8,6 @@ actix-web = "4.11"
 tokio = { version = "1.47", features = ["full"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
-log = "0.4"
 # Tracing 生态系统
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [
@@ -45,6 +44,10 @@ redis = { version = "0.32", features = ["tokio-comp", "connection-manager"] }
 itertools = "0.14.0"
 thiserror = "2"
 regex = "1"
+
+[dev-dependencies]
+# 开发依赖
+
 [[bin]]
 name = "servicekit"
 path = "src/main.rs"
