@@ -1,0 +1,76 @@
+# .github/workflows/docker-build.yml
+
+name: Docker Build and Push
+
+# 1. 触发器 (Trigger)
+# --------------------
+# 仅在 "main" 分支有 "push" 事件时触发此工作流
+on:
+  push:
+    branches: [ "main" ]
+
+# 2. 权限 (Permissions)
+# --------------------
+# 为 GITHUB_TOKEN 设置权限，以便它可以推送到 GitHub Container Registry (GHCR)
+permissions:
+  contents: read      # 需要读取代码库
+  packages: write     # 需要写入 (推送) 镜像到 GHCR
+
+# 3. 任务 (Jobs)
+# --------------------
+jobs:
+  build-and-push:
+    name: Build and Push Image
+    # 使用最新的 Ubuntu 运行器
+    runs-on: ubuntu-latest
+
+    steps:
+      # 步骤 1: 检出代码 (Checkout)
+      # --------------------------
+      # 拉取您的代码库，以便 Actions 可以访问 Dockerfile 和项目代码
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # 步骤 2: 设置 QEMU (用于多架构构建)
+      # --------------------------
+      # 这是实现跨平台构建 (amd64, arm64) 的关键
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      # 步骤 3: 设置 Docker Buildx
+      # --------------------------
+      # 激活 Docker 的下一代构建器
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 步骤 4: 登录到 Docker Hub
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 步骤 5: 提取 Docker 元数据 (自动生成标签)
+      # --------------------------
+      # 此操作会自动创建标签，例如：
+      # - main 分支: :latest
+      # - Git 标签 (v1.2.0): :v1.2.0 和 :latest
+      # - Git SHA: :sha-abcdef
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # 镜像名称的格式为: <用户名>/<仓库名>
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}
+
+      # 步骤 6: 构建并推送镜像
+      # --------------------------
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .  # 使用当前目录作为构建上下文
+          file: ./Dockerfile # Dockerfile 的路径
+          platforms: linux/amd64,linux/arm64 # 构建多架构镜像
+          push: true  # 确保执行 "push" 操作
+          tags: ${{ steps.meta.outputs.tags }}    # 使用上一步生成的标签
+          labels: ${{ steps.meta.outputs.labels }} # 添加推荐的 OCI 标签
