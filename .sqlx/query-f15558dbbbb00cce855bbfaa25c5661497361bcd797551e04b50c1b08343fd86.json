@@ -1,0 +1,434 @@
+{
+  "db_name": "MySQL",
+  "query": "-- name: get_class_list\n-- 获取培训列表\nSELECT a.ID                              AS _id,\n       a.ID                              AS id,\n       a.DATASTATE                       AS operation,\n       a.TRAINID                         AS training_id,\n       a.TRAINNAME                       AS training_name,\n       tl.`NAME`                         AS train_level,\n       tm.`NAME`                         AS train_mode,\n       tc.`NAME`                         AS train_category,\n       IF(CHAR_LENGTH(a.TRAINCONTENT) > 98, CONCAT(SUBSTRING(a.TRAINCONTENT, 1, 98), '...'),\n          a.TRAINCONTENT)                AS train_content,\n       a.TRAINPURPOSE                    AS train_purpose,\n       a.TRAINOBJECT                     AS train_object,\n       a.TRAINCLAIM                      AS train_claim,\n       a.UNDERTAKEORGNAME                AS train_organizer,\n       a.MSSCODE                         AS plan_id,\n       tt.`NAME`                         AS train_type,\n       CONCAT_WS(\n               '/',\n               '反应层',\n               IF(locate('1', a.TRAINASSESSTYPE) > 0, '学习层', ''),\n               IF(locate('2', a.TRAINASSESSTYPE) > 0, '行为层', ''),\n               IF(locate('3', a.TRAINASSESSTYPE) > 0, '专项评估', '')\n       )                                 AS train_assess_type,\n       a.TRAINNINGDURATION               AS train_time,\n       a.TRAINPEOPLENUMBER               AS train_people_number,\n       a.TRAINSPONSORNUMBER              AS train_sponsor_number,\n       a.TRAINUSERASSESS                 AS train_user_assess,\n       a.TRAINSPONSORASSESS              AS train_sponsor_assess,\n       a.TRAINEXPLAN                     AS train_explan,\n       tao.`NAME`                        AS train_assist_organizer,\n       tru.MSS_HRCODE                    as train_responsible_user,\n       a.TRAINRESPONSIBLEUSERNAME        AS train_responsible_user_name,\n       tpt.`NAME`                        AS train_address,\n       IF(CHAR_LENGTH(a.TRAINADDRESSINFO) > 98, CONCAT(SUBSTRING(a.TRAINADDRESSINFO, 1, 98), '...'),\n          a.TRAINADDRESSINFO)            AS train_address_info,\n       a.TRAINRESPONSIBLEUSERMOBILE      AS train_responsible_user_mobile,\n       substring(a.TRAINBEGTIME, 1, 10)  AS train_beg_time,\n       substring(a.TRAINENDTIME, 1, 10)  AS train_end_time,\n       substring(a.SIGNUPBEGTIME, 1, 10) AS signup_beg_time,\n       substring(a.SIGNUPENDTIME, 1, 10) AS signup_end_time,\n       a.TRAINCOST                       AS train_fee,\n       ts.name                           AS training_status,\n       b.MSSHRCODE                       AS sup_dept_code,\n       a.SUPDEPTNAME                     AS sup_dept_name,\n       b.MSSTYPE                         AS sup_dept_type,\n       o.MSSHRCODE                       AS creat_plan_org,\n       o.msstype                         AS creat_plan_org_type,\n       o.MSSHRCODE                       AS org_id,\n       a.ORGANIZERNAME                   AS org_name,\n       o.msstype                         AS org_class\nFROM NU_TRAINSOURCEDATA_xzs_hyk a\n         LEFT JOIN MC_ORG_SHOW b ON a.supDeptCode = b.id\n         LEFT JOIN MC_ORG_SHOW o ON a.ORGANIZERID = o.id\n         left join mc_user_ztk tru on tru.ID = a.TRAINRESPONSIBLEUSER\n         left join fz_train_traincategory tc on tc.`CODE` = a.TRAINCATEGORY\n         left join fz_train_trainmode tm on tm.`CODE` = a.TRAINMODE\n         left join fz_train_traintype tt on tt.`CODE` = a.TRAINTYPE\n         left join fz_train_trainingplacetype tpt on tpt.`CODE` = a.ISDOMESTIC\n         left join fz_train_trainstatus ts on ts.`CODE` = a.trainstatus\n         left join fz_train_trainlevel tl on tl.`CODE` = a.TRAINLEVEL\n         LEFT JOIN mc_org_show tao on tao.id = a.TRAINASSISTORGANIZER\nWHERE 1 = 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "_id",
+        "type_info": {
+          "type": "VarString",
+          "flags": "MULTIPLE_KEY",
+          "max_size": 200
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "id",
+        "type_info": {
+          "type": "VarString",
+          "flags": "MULTIPLE_KEY",
+          "max_size": 200
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "operation",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 400
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "training_id",
+        "type_info": {
+          "type": "VarString",
+          "flags": "MULTIPLE_KEY",
+          "max_size": 400
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "training_name",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 400
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "train_level",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "train_mode",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "train_category",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "train_content",
+        "type_info": {
+          "type": "Blob",
+          "flags": "",
+          "max_size": 4294967295
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "train_purpose",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "max_size": 4294967295
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "train_object",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "train_claim",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "max_size": 4294967295
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "train_organizer",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 1200
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "plan_id",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 400
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "train_type",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "train_assess_type",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL",
+          "max_size": 64
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "train_time",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "",
+          "max_size": 22
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "train_people_number",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "",
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "train_sponsor_number",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "",
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "train_user_assess",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "",
+          "max_size": 12
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "train_sponsor_assess",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "",
+          "max_size": 12
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "train_explan",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "max_size": 4294967295
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "train_assist_organizer",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "train_responsible_user",
+        "type_info": {
+          "type": "VarString",
+          "flags": "MULTIPLE_KEY",
+          "max_size": 1020
+        }
+      },
+      {
+        "ordinal": 24,
+        "name": "train_responsible_user_name",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 200
+        }
+      },
+      {
+        "ordinal": 25,
+        "name": "train_address",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 26,
+        "name": "train_address_info",
+        "type_info": {
+          "type": "Blob",
+          "flags": "",
+          "max_size": 786420
+        }
+      },
+      {
+        "ordinal": 27,
+        "name": "train_responsible_user_mobile",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 200
+        }
+      },
+      {
+        "ordinal": 28,
+        "name": "train_beg_time",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 40
+        }
+      },
+      {
+        "ordinal": 29,
+        "name": "train_end_time",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 40
+        }
+      },
+      {
+        "ordinal": 30,
+        "name": "signup_beg_time",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 40
+        }
+      },
+      {
+        "ordinal": 31,
+        "name": "signup_end_time",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 40
+        }
+      },
+      {
+        "ordinal": 32,
+        "name": "train_fee",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "",
+          "max_size": 12
+        }
+      },
+      {
+        "ordinal": 33,
+        "name": "training_status",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 34,
+        "name": "sup_dept_code",
+        "type_info": {
+          "type": "VarString",
+          "flags": "MULTIPLE_KEY",
+          "max_size": 200
+        }
+      },
+      {
+        "ordinal": 35,
+        "name": "sup_dept_name",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 200
+        }
+      },
+      {
+        "ordinal": 36,
+        "name": "sup_dept_type",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 400
+        }
+      },
+      {
+        "ordinal": 37,
+        "name": "creat_plan_org",
+        "type_info": {
+          "type": "VarString",
+          "flags": "MULTIPLE_KEY",
+          "max_size": 200
+        }
+      },
+      {
+        "ordinal": 38,
+        "name": "creat_plan_org_type",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 400
+        }
+      },
+      {
+        "ordinal": 39,
+        "name": "org_id",
+        "type_info": {
+          "type": "VarString",
+          "flags": "MULTIPLE_KEY",
+          "max_size": 200
+        }
+      },
+      {
+        "ordinal": 40,
+        "name": "org_name",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 200
+        }
+      },
+      {
+        "ordinal": 41,
+        "name": "org_class",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 400
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "f15558dbbbb00cce855bbfaa25c5661497361bcd797551e04b50c1b08343fd86"
+}
