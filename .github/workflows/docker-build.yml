@@ -11,10 +11,9 @@ on:
 
 # 2. 权限 (Permissions)
 # --------------------
-# 为 GITHUB_TOKEN 设置权限，以便它可以推送到 GitHub Container Registry (GHCR)
 permissions:
   contents: read      # 需要读取代码库
-  packages: write     # 需要写入 (推送) 镜像到 GHCR
+  packages: write     # 需要写入 (推送) 镜像到 GitHub Container Registry (GHCR) 时需要
 
 # 3. 任务 (Jobs)
 # --------------------
@@ -27,7 +26,7 @@ jobs:
     steps:
       # 步骤 1: 检出代码 (Checkout)
       # --------------------------
-      # 拉取您的代码库，以便 Actions 可以访问 Dockerfile 和项目代码
+      # 拉取代码库，以便 Actions 可以访问 Dockerfile 和项目代码
       - name: Check out repository
         uses: actions/checkout@v4
 
@@ -70,7 +69,7 @@ jobs:
         with:
           context: .  # 使用当前目录作为构建上下文
           file: ./Dockerfile # Dockerfile 的路径
-          platforms: linux/amd64,linux/arm64 # 构建多架构镜像
+          platforms: linux/amd64 # 构建多架构镜像
           push: true  # 确保执行 "push" 操作
           tags: ${{ steps.meta.outputs.tags }}    # 使用上一步生成的标签
           labels: ${{ steps.meta.outputs.labels }} # 添加推荐的 OCI 标签
