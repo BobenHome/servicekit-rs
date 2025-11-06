@@ -1,6 +1,6 @@
 {
   "db_name": "MySQL",
-  "query": "-- name: get_train_sc_list\n-- 获取四川培训班列表\nSELECT a.ID                              AS _id,\n       a.ID                              AS id,\n       a.DATASTATE                       AS operation,\n       a.TRAINID                         AS training_id,\n       a.TRAINNAME                       AS training_name,\n       tl.`NAME`                         AS train_level,\n       tm.`NAME`                         AS train_mode,\n       tc.`NAME`                         AS train_category,\n       IF(CHAR_LENGTH(a.TRAINCONTENT) > 98, CONCAT(SUBSTRING(a.TRAINCONTENT, 1, 98), '...'),\n          a.TRAINCONTENT)                AS train_content,\n       a.TRAINPURPOSE                    AS train_purpose,\n       a.TRAINOBJECT                     AS train_object,\n       a.TRAINCLAIM                      AS train_claim,\n       a.UNDERTAKEORGNAME                AS train_organizer,\n       a.MSSCODE                         AS plan_id,\n       tt.`NAME`                         AS train_type,\n       CONCAT_WS(\n               '/',\n               '反应层',\n               IF(locate('1', a.TRAINASSESSTYPE) > 0, '学习层', ''),\n               IF(locate('2', a.TRAINASSESSTYPE) > 0, '行为层', ''),\n               IF(locate('3', a.TRAINASSESSTYPE) > 0, '专项评估', '')\n       )                                 AS train_assess_type,\n       a.TRAINNINGDURATION               AS train_time,\n       a.TRAINPEOPLENUMBER               AS train_people_number,\n       a.TRAINSPONSORNUMBER              AS train_sponsor_number,\n       a.TRAINUSERASSESS                 AS train_user_assess,\n       a.TRAINSPONSORASSESS              AS train_sponsor_assess,\n       a.TRAINEXPLAN                     AS train_explan,\n       tao.`NAME`                        AS train_assist_organizer,\n       tru.MSS_HRCODE                    as train_responsible_user,\n       a.TRAINRESPONSIBLEUSERNAME        AS train_responsible_user_name,\n       tpt.`NAME`                        AS train_address,\n       IF(CHAR_LENGTH(a.TRAINADDRESSINFO) > 98, CONCAT(SUBSTRING(a.TRAINADDRESSINFO, 1, 98), '...'),\n          a.TRAINADDRESSINFO)            AS train_address_info,\n       a.TRAINRESPONSIBLEUSERMOBILE      AS train_responsible_user_mobile,\n       substring(a.TRAINBEGTIME, 1, 10)  AS train_beg_time,\n       substring(a.TRAINENDTIME, 1, 10)  AS train_end_time,\n       substring(a.SIGNUPBEGTIME, 1, 10) AS signup_beg_time,\n       substring(a.SIGNUPENDTIME, 1, 10) AS signup_end_time,\n       a.TRAINCOST                       AS train_fee,\n       ts.name                           AS training_status,\n       b.MSSHRCODE                       AS sup_dept_code,\n       a.SUPDEPTNAME                     AS sup_dept_name,\n       b.MSSTYPE                         AS sup_dept_type,\n       o.MSSHRCODE                       AS creat_plan_org,\n       o.msstype                         AS creat_plan_org_type,\n       o.MSSHRCODE                       AS org_id,\n       '中国电信四川公司本部'                AS org_name,\n       o.msstype                         AS org_class\nFROM NU_TRAINSOURCEDATA_SC_HYK a\n         LEFT JOIN MC_ORG_SHOW b ON a.supDeptCode = b.id\n         LEFT JOIN MC_ORG_SHOW o ON a.ORGANIZERID = o.id\n         left join mc_user_ztk tru on tru.ID = a.TRAINRESPONSIBLEUSER\n         left join fz_train_traincategory tc on tc.`CODE` = a.TRAINCATEGORY\n         left join fz_train_trainmode tm on tm.`CODE` = a.TRAINMODE\n         left join fz_train_traintype tt on tt.`CODE` = a.TRAINTYPE\n         left join fz_train_trainingplacetype tpt on tpt.`CODE` = a.ISDOMESTIC\n         left join fz_train_trainstatus ts on ts.`CODE` = a.trainstatus\n         left join fz_train_trainlevel tl on tl.`CODE` = a.TRAINLEVEL\n         LEFT JOIN mc_org_show tao on tao.id = a.TRAINASSISTORGANIZER\nWHERE 1 = 1",
+  "query": "-- name: get_class_list\n-- 获取培训列表\nSELECT a.ID                              AS _id,\n       a.ID                              AS id,\n       a.DATASTATE                       AS operation,\n       a.TRAINID                         AS training_id,\n       a.TRAINNAME                       AS training_name,\n       tl.`NAME`                         AS train_level,\n       tm.`NAME`                         AS train_mode,\n       tc.`NAME`                         AS train_category,\n       IF(CHAR_LENGTH(a.TRAINCONTENT) > 98, CONCAT(SUBSTRING(a.TRAINCONTENT, 1, 98), '...'),\n          a.TRAINCONTENT)                AS train_content,\n       a.TRAINPURPOSE                    AS train_purpose,\n       a.TRAINOBJECT                     AS train_object,\n       a.TRAINCLAIM                      AS train_claim,\n       a.UNDERTAKEORGNAME                AS train_organizer,\n       a.MSSCODE                         AS plan_id,\n       tt.`NAME`                         AS train_type,\n       CONCAT_WS(\n               '/',\n               '反应层',\n               IF(locate('1', a.TRAINASSESSTYPE) > 0, '学习层', ''),\n               IF(locate('2', a.TRAINASSESSTYPE) > 0, '行为层', ''),\n               IF(locate('3', a.TRAINASSESSTYPE) > 0, '专项评估', '')\n       )                                 AS train_assess_type,\n       a.TRAINNINGDURATION               AS train_time,\n       a.TRAINPEOPLENUMBER               AS train_people_number,\n       a.TRAINSPONSORNUMBER              AS train_sponsor_number,\n       a.TRAINUSERASSESS                 AS train_user_assess,\n       a.TRAINSPONSORASSESS              AS train_sponsor_assess,\n       a.TRAINEXPLAN                     AS train_explan,\n       tao.`NAME`                        AS train_assist_organizer,\n       tru.MSS_HRCODE                    as train_responsible_user,\n       a.TRAINRESPONSIBLEUSERNAME        AS train_responsible_user_name,\n       tpt.`NAME`                        AS train_address,\n       IF(CHAR_LENGTH(a.TRAINADDRESSINFO) > 98, CONCAT(SUBSTRING(a.TRAINADDRESSINFO, 1, 98), '...'),\n          a.TRAINADDRESSINFO)            AS train_address_info,\n       a.TRAINRESPONSIBLEUSERMOBILE      AS train_responsible_user_mobile,\n       substring(a.TRAINBEGTIME, 1, 10)  AS train_beg_time,\n       substring(a.TRAINENDTIME, 1, 10)  AS train_end_time,\n       substring(a.SIGNUPBEGTIME, 1, 10) AS signup_beg_time,\n       substring(a.SIGNUPENDTIME, 1, 10) AS signup_end_time,\n       a.TRAINCOST                       AS train_fee,\n       ts.name                           AS training_status,\n       b.MSSHRCODE                       AS sup_dept_code,\n       a.SUPDEPTNAME                     AS sup_dept_name,\n       b.MSSTYPE                         AS sup_dept_type,\n       o.MSSHRCODE                       AS creat_plan_org,\n       o.msstype                         AS creat_plan_org_type,\n       o.MSSHRCODE                       AS org_id,\n       a.ORGANIZERNAME                   AS org_name,\n       o.msstype                         AS org_class\nFROM NU_TRAINSOURCEDATA_xzs_hyk a\n         LEFT JOIN MC_ORG_SHOW b ON a.supDeptCode = b.id\n         LEFT JOIN MC_ORG_SHOW o ON a.ORGANIZERID = o.id\n         left join mc_user_ztk tru on tru.ID = a.TRAINRESPONSIBLEUSER\n         left join fz_train_traincategory tc on tc.`CODE` = a.TRAINCATEGORY\n         left join fz_train_trainmode tm on tm.`CODE` = a.TRAINMODE\n         left join fz_train_traintype tt on tt.`CODE` = a.TRAINTYPE\n         left join fz_train_trainingplacetype tpt on tpt.`CODE` = a.ISDOMESTIC\n         left join fz_train_trainstatus ts on ts.`CODE` = a.trainstatus\n         left join fz_train_trainlevel tl on tl.`CODE` = a.TRAINLEVEL\n         LEFT JOIN mc_org_show tao on tao.id = a.TRAINASSISTORGANIZER\nWHERE 1 = 1",
   "describe": {
     "columns": [
       {
@@ -27,7 +27,7 @@
         "type_info": {
           "type": "VarString",
           "flags": "",
-          "max_size": 200
+          "max_size": 400
         }
       },
       {
@@ -117,7 +117,7 @@
         "type_info": {
           "type": "VarString",
           "flags": "",
-          "max_size": 2000
+          "max_size": 1200
         }
       },
       {
@@ -153,7 +153,7 @@
         "type_info": {
           "type": "NewDecimal",
           "flags": "",
-          "max_size": 12
+          "max_size": 22
         }
       },
       {
@@ -225,7 +225,7 @@
         "type_info": {
           "type": "VarString",
           "flags": "",
-          "max_size": 800
+          "max_size": 200
         }
       },
       {
@@ -324,7 +324,7 @@
         "type_info": {
           "type": "VarString",
           "flags": "",
-          "max_size": 2000
+          "max_size": 200
         }
       },
       {
@@ -368,8 +368,8 @@
         "name": "org_name",
         "type_info": {
           "type": "VarString",
-          "flags": "NOT_NULL",
-          "max_size": 40
+          "flags": "",
+          "max_size": 200
         }
       },
       {
@@ -426,9 +426,9 @@
       true,
       true,
       true,
-      false,
+      true,
       true
     ]
   },
-  "hash": "6d16175b1d748cdb7ed87d066a8d7a0c3444e53c890d54dc3a6092114e03b14f"
+  "hash": "f15558dbbbb00cce855bbfaa25c5661497361bcd797551e04b50c1b08343fd86"
 }

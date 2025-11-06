@@ -6,9 +6,10 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    info!("Application starting...");
     // 1. 初始化日志系统
-    logging::init_logging().context("Failed to initialize logging")?;
+    // 主线程需持有guard，不然guard会在init_logging调用完后drop掉导致 worker 线程立即停止（不会写日志到文件中）
+    let _guard = logging::init_logging().context("Failed to initialize logging")?;
+    info!("Application starting...");
 
     // 2. 加载应用程序配置
     let app_config = AppConfig::new().context("Failed to load application configuration")?;
@@ -20,6 +21,8 @@ async fn main() -> Result<()> {
         Arc::clone(&app_config.mss_info_config),
         Arc::clone(&app_config.telecom_config),
         Arc::clone(&app_config.clickhouse_config),
+        Arc::clone(&app_config.redis_config),
+        app_config.provinces,
     )
     .await?;
     let app_context_arc = Arc::new(app_context);
@@ -27,7 +30,7 @@ async fn main() -> Result<()> {
     // 4. 初始化和启动任务调度器
     let scheduler = TaskSchedulerManager::new().await?;
     scheduler
-        .initialize_tasks(Arc::clone(&app_context_arc), &app_config)
+        .initialize_tasks(Arc::clone(&app_context_arc), &app_config.tasks)
         .await?;
     scheduler.start().await;
 

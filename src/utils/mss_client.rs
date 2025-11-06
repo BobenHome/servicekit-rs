@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::Local;
 use reqwest::Client;
-use serde_json::{from_str, json, Value};
+use serde_json::{Value, from_str, json};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -94,7 +94,7 @@ pub async fn psn_dos_push(
     // 统一的错误处理和记录逻辑
     let current_time = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
-    let primary_result = match result_of_send_loop {
+    match result_of_send_loop {
         Ok(http_body_str) => {
             // 请求成功，记录成功信息
             let record_reply = RecordMssReply {
@@ -141,8 +141,7 @@ pub async fn psn_dos_push(
             // 返回原始的失败结果，以便 execute 方法能知道发生了错误
             Err(e)
         }
-    };
-    primary_result // 返回主结果，它包含了 send_loop 的结果以及记录的结果
+    } // 返回主结果，它包含了 send_loop 的结果以及记录的结果
 }
 
 /// 检查 HTTP 响应体是否指示需要“休息”（重试）

@@ -1,0 +1,72 @@
+# 数据库配置
+database_url = "mysql://dxxy:dreamsoft@2020@172.25.1.175:3306/dxxy"
+
+# Web 服务器端口
+web_server_port = 8084
+
+# 所有任务的配置
+[tasks]
+[tasks.psn_push] # psn_push任务
+cron_schedule = "0 0 5 * * *" # 每天 5 点执行一次
+task_name = "培训班数据归档到MSS定时任务"
+
+# MSS 服务配置
+[mss_info_config]
+app_id = "c17eb77644576d28251383c9fc25124d"
+app_key = "bf1685e2184903789d0be9a0f2c8b91f"
+app_url = "http://10.141.134.30:12500/serviceAgent/rest/hrapi/HrTrainInfo/pushTrainingInfo"
+
+# 电信相关配置
+[telecom_config]
+gateway_url = "http://gateway.mylearning.cn/service-gateway"
+source_app_id = 40026
+mode = 0
+is_sync = true
+[telecom_config.targets]
+newtca = 40029
+basedata = 1
+mss = 40010
+
+# ClickHouse Configuration
+[clickhouse_config]
+hosts = ["172.25.1.33", "172.25.1.176", "172.25.1.84"]
+ports = [9000, 9001]
+user = "dba"
+password = "dba_dream"
+database = "DXXY_LOCAL"
+
+[redis_config]
+url = "redis://:dreamsoft%402023@172.25.1.154:6379/0"
+
+[provinces]
+"41994" = "上海"
+"102223" = "湖北"
+"15790" = "江苏"
+"172337" = "四川"
+"19350" = "福建"
+"241247" = "西藏"
+"244420" = "陕西"
+"24840" = "新疆"
+"24884" = "贵州"
+"25905" = "甘肃"
+"25935" = "青海"
+"29644" = "浙江"
+"310491" = "重庆"
+"31431" = "海南"
+"31464" = "安徽"
+"333821" = "江西"
+"34548" = "广东"
+"354287" = "北京"
+"361487" = "内蒙古"
+"36562" = "宁夏"
+"369402" = "山西"
+"375692" = "山东"
+"378964" = "黑龙江"
+"379932" = "辽宁"
+"388599" = "河南"
+"405080" = "河北"
+"41023" = "湖南"
+"419775" = "吉林"
+"488087" = "天津"
+"60327" = "云南"
+"62427" = "广西"

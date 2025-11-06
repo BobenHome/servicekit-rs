@@ -3,8 +3,8 @@ use serde_json::Value;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Destination {
-    pub source: i32,
-    pub target: i32,
+    pub source: u32,
+    pub target: u32,
     pub service: String,
     pub mode: i32,
     #[serde(rename = "sync")]

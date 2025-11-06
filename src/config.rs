@@ -1,6 +1,8 @@
-use std::sync::Arc;
-
+use config::{Config, ConfigError, Environment, File};
 use serde::Deserialize;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tracing::info;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AppConfig {
@@ -13,13 +15,14 @@ pub struct AppConfig {
     pub telecom_config: Arc<TelecomConfig>, // 电信相关配置
     #[serde(skip)]
     pub clickhouse_config: Arc<ClickhouseConfig>, // ClickHouse配置
+    #[serde(skip)]
+    pub redis_config: Arc<RedisConfig>,
+    pub provinces: HashMap<String, String>, // 省份配置
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct TasksConfig {
     pub psn_push: PsnPushTaskConfig,
-    // 其他任务继续添加
-    // pub another_task: AnotherTaskConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -36,12 +39,19 @@ pub struct MssInfoConfig {
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
+pub struct Targets {
+    pub newtca: u32,
+    pub basedata: u32,
+    pub mss: u32,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct TelecomConfig {
     pub gateway_url: String,
-    pub source_app_id: i32,
-    pub target_app_id: i32,
+    pub source_app_id: u32,
     pub mode: i32,
     pub is_sync: bool,
+    pub targets: Targets,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -62,13 +72,32 @@ struct RawAppConfig {
     pub mss_info_config: MssInfoConfig,
     pub telecom_config: TelecomConfig,
     pub clickhouse_config: ClickhouseConfig,
+    pub redis_config: RedisConfig,
+    provinces: HashMap<String, String>,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct RedisConfig {
+    pub url: String,
 }
 
 impl AppConfig {
-    pub fn new() -> Result<Self, config::ConfigError> {
-        let builder = config::Config::builder()
-            .add_source(config::File::with_name("config/default.toml"))
-            .add_source(config::Environment::with_prefix("APP").separator("__")); // 允许环境变量覆盖 (例如: APP__TASKS__PSN_TRAIN_PUSH__CRON_SCHEDULE)
+    pub fn new() -> Result<Self, ConfigError> {
+        // 检测环境：dev 或 release
+        // 支持环境变量覆盖启动 RUST_ENV=staging cargo run
+        let env = std::env::var("RUST_ENV").unwrap_or_else(|_| {
+            if cfg!(debug_assertions) {
+                "dev".to_string()
+            } else {
+                "release".to_string()
+            }
+        });
+        let config_file = format!("config/{}.toml", env);
+        info!("Loading configuration from: {}", config_file);
+
+        let builder = Config::builder()
+            .add_source(File::with_name(&config_file))
+            .add_source(Environment::with_prefix("APP").separator("__")); // 允许环境变量覆盖 (例如: APP__TASKS__PSN_TRAIN_PUSH__CRON_SCHEDULE)
 
         // 使用 try_deserialize 来直接反序列化为 RawAppConfig
         // 在反序列化后手动将相关字段包装到 Arc 中，并返回 AppConfig
@@ -80,6 +109,8 @@ impl AppConfig {
             mss_info_config: Arc::new(raw_config.mss_info_config),
             telecom_config: Arc::new(raw_config.telecom_config),
             clickhouse_config: Arc::new(raw_config.clickhouse_config),
+            redis_config: Arc::new(raw_config.redis_config),
+            provinces: raw_config.provinces,
         })
     }
 }

@@ -1,17 +1,15 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
 use sqlx::{Execute, MySql, QueryBuilder};
 
 use crate::models::train::ArchiveData;
-use crate::schedule::push_executor::{execute_push_task_logic, PsnDataWrapper, QueryType};
 use crate::schedule::BasePsnPushTask;
+use crate::schedule::push_executor::{PsnDataWrapper, QueryType, execute_push_task_logic};
 use crate::{AppContext, DynamicPsnData, PsnDataKind, TaskExecutor};
 
 pub struct PsnArchivePushTask {
-    base: BasePsnPushTask, // <-- 嵌入 BasePsnPushTask
+    base: BasePsnPushTask,
 }
 
 impl PsnDataWrapper for PsnArchivePushTask {
@@ -24,23 +22,9 @@ impl PsnDataWrapper for PsnArchivePushTask {
         // <-- 显式地将 sqlx::query_file! 的结果存入变量，再调用 .sql()
         let raw_sql_query = sqlx::query_file!("queries/archive.sql");
         // 使用 QueryBuilder 创建查询构建器
-        let mut query_builder = QueryBuilder::<MySql>::new(raw_sql_query.sql());
+        let query_builder = QueryBuilder::<MySql>::new(raw_sql_query.sql());
 
-        match query_type {
-            QueryType::ByDate(hit_date) => {
-                query_builder.push(" AND c.hitdate = ");
-                query_builder.push_bind(hit_date);
-            }
-            QueryType::ByIds(ids) => {
-                query_builder.push(" AND c.TRAINID IN (");
-                let mut separated = query_builder.separated(", ");
-                for id in ids {
-                    separated.push_bind(id);
-                }
-                separated.push_unseparated(")");
-            }
-        }
-        query_builder
+        Self::apply_query_filters(query_builder, query_type, "c.hitdate", "c.TRAINID")
     }
 
     fn get_psn_data_kind_for_wrapper() -> PsnDataKind {
@@ -60,9 +44,9 @@ impl PsnArchivePushTask {
     }
 }
 
-// 实现 TaskExecutor trait
+#[async_trait::async_trait]
 impl TaskExecutor for PsnArchivePushTask {
-    fn execute(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
-        Box::pin(execute_push_task_logic::<PsnArchivePushTask>(&self.base))
+    async fn execute(&self) -> Result<()> {
+        execute_push_task_logic::<PsnArchivePushTask>(&self.base).await
     }
 }

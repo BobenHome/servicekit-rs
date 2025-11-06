@@ -118,24 +118,35 @@ impl PushResultParser {
         result_details: &mut Vec<MssPushResultDetail>,
     ) {
         for &(key, data_type_val, id_field, result_field) in &REQUEST_KEYS {
-            if let Some(array) = request_data.get(key).and_then(Value::as_array) {
-                if let Some(obj) = array.first().and_then(Value::as_object) {
-                    if let Some(id_val) = obj.get(id_field).and_then(Value::as_str) {
-                        push_result.data_type = Some(data_type_val);
+            if let Some(array) = request_data.get(key).and_then(Value::as_array)
+                && let Some(obj) = array.first().and_then(Value::as_object)
+                && let Some(id_val) = obj.get(id_field).and_then(Value::as_str)
+            {
+                push_result.data_type = Some(data_type_val);
 
-                        match result_field {
-                            "train_id" => push_result.train_id = Some(id_val.to_string()),
-                            "course_id" => push_result.course_id = Some(id_val.to_string()),
-                            "user_id" => push_result.user_id = Some(id_val.to_string()),
-                            _ => (),
-                        }
-
-                        result_details.push(MssPushResultDetail {
-                            data_id: push_result.id.clone(),
-                            result_id: Some(id_val.to_string()),
-                        });
+                match result_field {
+                    "train_id" => push_result.train_id = Some(id_val.to_string()),
+                    "course_id" => {
+                        push_result.course_id = Some(id_val.to_string());
+                        push_result.train_id = obj
+                            .get("trainingId")
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string);
                     }
+                    "user_id" => {
+                        push_result.user_id = Some(id_val.to_string());
+                        push_result.train_id = obj
+                            .get("trainingId")
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string);
+                    }
+                    _ => (),
                 }
+
+                result_details.push(MssPushResultDetail {
+                    data_id: push_result.id.clone(),
+                    result_id: Some(id_val.to_string()),
+                });
             }
         }
     }
@@ -192,36 +203,36 @@ impl PushResultParser {
         // 从错误数据中提取信息
         if let Some(error_data_obj) = error_data.as_object() {
             for &(key, data_type_val, id_field) in &ERROR_KEYS {
-                if let Some(array) = error_data_obj.get(key).and_then(Value::as_array) {
-                    if let Some(obj) = array.first().and_then(Value::as_object) {
-                        push_result.data_type = Some(data_type_val);
+                if let Some(array) = error_data_obj.get(key).and_then(Value::as_array)
+                    && let Some(obj) = array.first().and_then(Value::as_object)
+                {
+                    push_result.data_type = Some(data_type_val);
 
-                        // 提取ID字段
-                        if let Some(id_val) = obj.get(id_field).and_then(Value::as_str) {
-                            result_details.push(MssPushResultDetail {
-                                data_id: push_result.id.clone(),
-                                result_id: Some(id_val.to_string()),
-                            });
-                        }
+                    // 提取ID字段
+                    if let Some(id_val) = obj.get(id_field).and_then(Value::as_str) {
+                        result_details.push(MssPushResultDetail {
+                            data_id: push_result.id.clone(),
+                            result_id: Some(id_val.to_string()),
+                        });
+                    }
 
-                        // 提取错误信息
-                        if let Some(msg) = obj.get("errormsg").and_then(Value::as_str) {
-                            push_result.error_msg = Some(msg.to_string());
-                        }
-                        if let Some(code) = obj.get("errorcode").and_then(Value::as_str) {
-                            push_result.error_code = Some(code.to_string());
-                        }
+                    // 提取错误信息
+                    if let Some(msg) = obj.get("errormsg").and_then(Value::as_str) {
+                        push_result.error_msg = Some(msg.to_string());
+                    }
+                    if let Some(code) = obj.get("errorcode").and_then(Value::as_str) {
+                        push_result.error_code = Some(code.to_string());
+                    }
 
-                        // 提取其他可能存在的ID
-                        if let Some(train_id) = obj.get("trainingId").and_then(Value::as_str) {
-                            push_result.train_id = Some(train_id.to_string());
-                        }
-                        if let Some(course_id) = obj.get("course_id").and_then(Value::as_str) {
-                            push_result.course_id = Some(course_id.to_string());
-                        }
-                        if let Some(user_id) = obj.get("userId").and_then(Value::as_str) {
-                            push_result.user_id = Some(user_id.to_string());
-                        }
+                    // 提取其他可能存在的ID
+                    if let Some(train_id) = obj.get("trainingId").and_then(Value::as_str) {
+                        push_result.train_id = Some(train_id.to_string());
+                    }
+                    if let Some(course_id) = obj.get("course_id").and_then(Value::as_str) {
+                        push_result.course_id = Some(course_id.to_string());
+                    }
+                    if let Some(user_id) = obj.get("userId").and_then(Value::as_str) {
+                        push_result.user_id = Some(user_id.to_string());
                     }
                 }
             }
