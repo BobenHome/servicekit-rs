@@ -48,6 +48,8 @@ jobs:
         with:
           # 镜像名称的格式为: ghcr.io/<用户名>/<仓库名>
           images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
 
       # 步骤 6: 构建并推送镜像
       # --------------------------
