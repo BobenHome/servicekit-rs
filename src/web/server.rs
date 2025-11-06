@@ -1,8 +1,8 @@
-use std::sync::Arc;
-
 use crate::{web::binlog_handlers, web::mss_handlers, AppContext};
+use actix_files::Files;
 use actix_web::{middleware, web, App, HttpServer};
 use anyhow::{Context, Result};
+use std::sync::Arc;
 use tracing::info;
 
 pub struct WebServer {
@@ -25,6 +25,11 @@ impl WebServer {
                 .app_data(web::Data::new(Arc::clone(&app_context))) // 在每个 worker 线程中克隆一次
                 .wrap(middleware::Logger::default()) // 启用请求日志
                 .wrap(middleware::Compress::default()) // 启用响应压缩
+                .service(
+                    // 在根路径 / 提供 static 目录下的文件
+                    // 并设置 index_file("index.html") 作为根路径 / 的默认文件
+                    Files::new("/", "./static").index_file("index.html"), // <--- 添加静态文件服务
+                )
                 .service(
                     web::scope("/api") // 创建一个 /api 范围
                         .service(mss_handlers::push_mss) // 注册处理函数
