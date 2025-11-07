@@ -1,0 +1,36 @@
+# servicekit-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: servicekit-deployment
+  labels:
+    app: servicekit
+spec:
+  replicas: 2 # 运行 2 个 Pod 副本
+  selector:
+    matchLabels:
+      app: servicekit
+  template:
+    metadata:
+      labels:
+        app: servicekit
+    spec:
+      # 告诉 Kubernetes 使用 ghcr-auth Secret 来拉取镜像
+      imagePullSecrets:
+        - name: ghcr-auth
+      containers:
+        - name: servicekit
+          # 使用推送到 Docker Hub 或 GHCR 的镜像
+          image: ghcr.io/bobenhome/servicekit-rs:latest
+          # 容器端口
+          ports:
+            - containerPort: 8084
+          # 资源限制（确保 Pod 不会耗尽 Colima 的资源）
+          resources:
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          # 解决时区问题，通过环境变量配置
+          env:
+            - name: TZ
+              value: Asia/Shanghai

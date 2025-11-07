@@ -1,0 +1,14 @@
+# servicekit-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: servicekit-service
+spec:
+  # LoadBalancer 在 Colima K3s 中会被映射到主机端口
+  type: LoadBalancer
+  selector:
+    app: servicekit # 匹配 Deployment 的标签
+  ports:
+    - protocol: TCP
+      port: 8084      # Service 暴露的端口
+      targetPort: 8084 # 容器内部端口
